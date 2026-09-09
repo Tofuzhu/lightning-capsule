@@ -1,0 +1,521 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<meta name="theme-color" content="#0f172a" />
+<meta name="description" content="闪电胶囊 — 语音 / 文字随手记，边缘转写，秒存不丢。" />
+<title>闪电胶囊</title>
+<link rel="manifest" href="/manifest.webmanifest" />
+<link rel="icon" type="image/png" sizes="192x192" href="/icon-192.png" />
+<link rel="apple-touch-icon" href="/icon-192.png" />
+<style>
+  :root {
+    --bg: #0f172a;
+    --bg-2: #111c33;
+    --card: #172136;
+    --line: #26324a;
+    --text: #e6ecf6;
+    --muted: #93a0b8;
+    --accent: #fbbf24;
+    --accent-ink: #1f1600;
+    --rec: #ef4444;
+    --ok: #34d399;
+    --warn: #fbbf24;
+    --err: #f87171;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    background: radial-gradient(1200px 600px at 50% -10%, #16233d 0%, var(--bg) 60%);
+    color: var(--text);
+    font: 16px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+      "Hiragino Sans GB", "Microsoft YaHei", "Helvetica Neue", Arial, sans-serif;
+    min-height: 100dvh;
+    display: flex;
+    justify-content: center;
+  }
+  .app {
+    width: 100%;
+    max-width: 480px;
+    padding: env(safe-area-inset-top) 16px calc(16px + env(safe-area-inset-bottom));
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+  }
+  header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding-top: 18px;
+  }
+  .brand { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 20px; }
+  .brand .spark {
+    width: 30px; height: 30px; border-radius: 9px;
+    background: linear-gradient(160deg, #fbbf24, #f59e0b);
+    display: grid; place-items: center; color: #1f1600; font-size: 18px;
+  }
+  .icon-btn {
+    appearance: none; border: 1px solid var(--line); background: var(--bg-2);
+    color: var(--text); width: 40px; height: 40px; border-radius: 12px;
+    font-size: 18px; cursor: pointer; display: grid; place-items: center;
+  }
+  .icon-btn:active { transform: scale(0.96); }
+
+  .panel {
+    background: var(--card); border: 1px solid var(--line); border-radius: 16px;
+    padding: 16px;
+  }
+  .panel h2 { margin: 0 0 10px; font-size: 15px; color: var(--muted); font-weight: 600; }
+  .settings { display: none; }
+  .settings.open { display: block; }
+  .settings label { display: block; font-size: 13px; color: var(--muted); margin-bottom: 6px; }
+  .settings input {
+    width: 100%; padding: 12px; border-radius: 10px; border: 1px solid var(--line);
+    background: var(--bg); color: var(--text); font-size: 15px;
+  }
+  .settings .row { display: flex; gap: 8px; margin-top: 12px; }
+  .btn {
+    appearance: none; border: 0; border-radius: 10px; padding: 12px 16px;
+    font-size: 15px; font-weight: 600; cursor: pointer;
+  }
+  .btn-primary { background: var(--accent); color: var(--accent-ink); }
+  .btn-ghost { background: var(--bg-2); color: var(--text); border: 1px solid var(--line); }
+  .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+  .hint-inline { font-size: 12px; color: var(--muted); margin-top: 8px; }
+
+  .stage {
+    display: flex; flex-direction: column; align-items: center; gap: 14px;
+    padding: 22px 0 8px;
+  }
+  .rec-wrap { position: relative; width: 168px; height: 168px; display: grid; place-items: center; }
+  .pulse {
+    position: absolute; inset: 0; border-radius: 50%;
+    border: 2px solid var(--rec); opacity: 0;
+  }
+  .recording .pulse { animation: pulse 1.8s ease-out infinite; }
+  .recording .pulse:nth-child(2) { animation-delay: 0.6s; }
+  .recording .pulse:nth-child(3) { animation-delay: 1.2s; }
+  @keyframes pulse {
+    0% { transform: scale(0.7); opacity: 0.7; }
+    100% { transform: scale(1.25); opacity: 0; }
+  }
+  @media (prefers-reduced-motion: reduce) { .recording .pulse { animation: none; } }
+  .rec-btn {
+    position: relative; width: 132px; height: 132px; border-radius: 50%;
+    border: none; cursor: pointer; color: #fff; font-weight: 700; font-size: 16px;
+    background: linear-gradient(160deg, #f59e0b, #d97706);
+    box-shadow: 0 12px 30px -8px rgba(245, 158, 11, 0.5);
+    display: grid; place-items: center; gap: 4px; transition: transform 0.1s ease;
+  }
+  .rec-btn:active { transform: scale(0.97); }
+  .rec-btn .mic { font-size: 34px; line-height: 1; }
+  .rec-btn .label { font-size: 13px; font-weight: 600; }
+  .recording .rec-btn {
+    background: linear-gradient(160deg, #ef4444, #b91c1c);
+    box-shadow: 0 12px 30px -8px rgba(239, 68, 68, 0.55);
+  }
+  .rec-btn:disabled { filter: grayscale(0.3); opacity: 0.6; cursor: wait; }
+  .timer {
+    font-variant-numeric: tabular-nums; font-size: 30px; font-weight: 700;
+    letter-spacing: 1px; color: var(--text);
+  }
+  .timer.idle { color: var(--muted); }
+  .stage .sub { font-size: 13px; color: var(--muted); min-height: 18px; text-align: center; }
+
+  .result { display: none; }
+  .result.show { display: block; }
+  .result .tag {
+    display: inline-block; font-size: 12px; font-weight: 700; padding: 3px 8px;
+    border-radius: 999px; margin-bottom: 8px;
+  }
+  .result.ok .tag { background: rgba(52, 211, 153, 0.15); color: var(--ok); }
+  .result.info .tag { background: rgba(147, 160, 184, 0.18); color: var(--muted); }
+  .result.warn .tag { background: rgba(251, 191, 36, 0.15); color: var(--warn); }
+  .result.err .tag { background: rgba(248, 113, 113, 0.15); color: var(--err); }
+  .result .body { font-size: 15px; white-space: pre-wrap; word-break: break-word; }
+  .result .meta { font-size: 12px; color: var(--muted); margin-top: 8px; }
+
+  .composer { display: flex; flex-direction: column; gap: 10px; }
+  .composer textarea {
+    width: 100%; min-height: 68px; resize: vertical; padding: 12px; font-size: 15px;
+    border-radius: 12px; border: 1px solid var(--line); background: var(--bg); color: var(--text);
+    font-family: inherit;
+  }
+  .composer .send-row { display: flex; justify-content: flex-end; }
+
+  .history { display: flex; flex-direction: column; gap: 8px; }
+  .history .empty { font-size: 13px; color: var(--muted); }
+  .hist-item {
+    display: flex; align-items: center; gap: 10px; padding: 10px 12px;
+    background: var(--bg-2); border: 1px solid var(--line); border-radius: 10px;
+  }
+  .hist-item .hid {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px;
+    color: var(--muted); flex-shrink: 0;
+  }
+  .hist-item .hpv { flex: 1; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .hist-item .hst { font-size: 11px; font-weight: 700; padding: 2px 7px; border-radius: 999px; flex-shrink: 0; }
+  .hst.pending { background: rgba(52, 211, 153, 0.15); color: var(--ok); }
+  .hst.pending_retry { background: rgba(251, 191, 36, 0.15); color: var(--warn); }
+  .hst.synced { background: rgba(147, 160, 184, 0.18); color: var(--muted); }
+
+  footer { text-align: center; font-size: 11px; color: var(--muted); padding: 6px 0 2px; word-break: break-all; }
+
+  .toast {
+    position: fixed; left: 50%; bottom: calc(24px + env(safe-area-inset-bottom));
+    transform: translateX(-50%) translateY(20px); opacity: 0;
+    background: #0b1324; border: 1px solid var(--line); color: var(--text);
+    padding: 10px 16px; border-radius: 12px; font-size: 13px; pointer-events: none;
+    transition: opacity 0.2s ease, transform 0.2s ease; max-width: 90vw; text-align: center;
+  }
+  .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+</style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <div class="brand"><span class="spark">⚡</span><span>闪电胶囊</span></div>
+    <button class="icon-btn" id="gearBtn" aria-label="设置" title="设置">⚙️</button>
+  </header>
+
+  <section class="panel settings" id="settings">
+    <h2>设置</h2>
+    <label for="tokenInput">访问令牌（Bearer Token）</label>
+    <input id="tokenInput" type="password" autocomplete="off" autocapitalize="off"
+      spellcheck="false" placeholder="粘贴 AUTH_TOKEN" />
+    <div class="row">
+      <button class="btn btn-primary" id="saveToken">保存</button>
+      <button class="btn btn-ghost" id="closeSettings">关闭</button>
+    </div>
+    <p class="hint-inline">令牌仅保存在本设备浏览器（localStorage: <code>lc_auth_token</code>），每次请求自动带上 <code>Authorization: Bearer …</code>。</p>
+  </section>
+
+  <section class="stage" id="stage">
+    <div class="rec-wrap">
+      <span class="pulse"></span><span class="pulse"></span><span class="pulse"></span>
+      <button class="rec-btn" id="recBtn">
+        <span class="mic">🎙️</span><span class="label">按住说话</span>
+      </button>
+    </div>
+    <div class="timer idle" id="timer">00:00</div>
+    <div class="sub" id="stageSub">点击按钮开始录音，最长 30 秒</div>
+  </section>
+
+  <section class="panel result" id="result">
+    <span class="tag" id="resultTag">结果</span>
+    <div class="body" id="resultBody"></div>
+    <div class="meta" id="resultMeta"></div>
+  </section>
+
+  <section class="panel">
+    <h2>文字胶囊</h2>
+    <div class="composer">
+      <textarea id="textInput" placeholder="也可以直接打字，回车换行，点发送提交"></textarea>
+      <div class="send-row">
+        <button class="btn btn-primary" id="sendText">发送</button>
+      </div>
+    </div>
+  </section>
+
+  <section class="panel">
+    <h2>本次会话历史</h2>
+    <div class="history" id="history"><div class="empty">还没有提交过胶囊。</div></div>
+  </section>
+
+  <footer id="footer">API: —</footer>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+(function () {
+  "use strict";
+
+  var API_BASE = location.origin;              // never hard-coded
+  var CAPTURE_URL = API_BASE + "/api/capture";
+  var TOKEN_KEY = "lc_auth_token";
+  var MAX_MS = 30000;
+
+  var $ = function (id) { return document.getElementById(id); };
+  var gearBtn = $("gearBtn"), settings = $("settings"), tokenInput = $("tokenInput");
+  var saveToken = $("saveToken"), closeSettings = $("closeSettings");
+  var stage = $("stage"), recBtn = $("recBtn"), timerEl = $("timer"), stageSub = $("stageSub");
+  var result = $("result"), resultTag = $("resultTag"), resultBody = $("resultBody"), resultMeta = $("resultMeta");
+  var textInput = $("textInput"), sendTextBtn = $("sendText");
+  var historyEl = $("history"), toastEl = $("toast"), footer = $("footer");
+
+  footer.textContent = "API: " + API_BASE;
+
+  /* ---------------- token ---------------- */
+  function getToken() { return (localStorage.getItem(TOKEN_KEY) || "").trim(); }
+  function authHeader() { return "Bearer " + getToken(); }
+
+  tokenInput.value = getToken();
+  gearBtn.addEventListener("click", function () { settings.classList.toggle("open"); });
+  closeSettings.addEventListener("click", function () { settings.classList.remove("open"); });
+  saveToken.addEventListener("click", function () {
+    localStorage.setItem(TOKEN_KEY, tokenInput.value.trim());
+    settings.classList.remove("open");
+    toast("已保存访问令牌");
+    refreshTokenGate();
+  });
+
+  function refreshTokenGate() {
+    if (!getToken()) {
+      stageSub.textContent = "请先在设置中填入访问令牌";
+      recBtn.disabled = false; // allow click -> will prompt to open settings
+    } else if (!recording) {
+      stageSub.textContent = "点击按钮开始录音，最长 30 秒";
+    }
+  }
+
+  /* ---------------- toast + result card ---------------- */
+  var toastTimer;
+  function toast(msg) {
+    toastEl.textContent = msg;
+    toastEl.classList.add("show");
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(function () { toastEl.classList.remove("show"); }, 2600);
+  }
+  function showResult(kind, tagText, body, meta) {
+    result.className = "panel result show " + kind;
+    resultTag.textContent = tagText;
+    resultBody.textContent = body || "";
+    resultMeta.textContent = meta || "";
+  }
+  function fmtTime(iso) {
+    if (!iso) return "";
+    var d = new Date(iso);
+    if (isNaN(d.getTime())) return String(iso);
+    var p = function (n) { return String(n).padStart(2, "0"); };
+    return d.getFullYear() + "-" + p(d.getMonth() + 1) + "-" + p(d.getDate()) +
+      " " + p(d.getHours()) + ":" + p(d.getMinutes());
+  }
+
+  /* ---------------- session history ---------------- */
+  var history = [];
+  function addHistory(id, preview, status) {
+    history.unshift({ id: id || "(无 id)", preview: preview || "", status: status || "pending" });
+    renderHistory();
+  }
+  function renderHistory() {
+    if (!history.length) { historyEl.innerHTML = '<div class="empty">还没有提交过胶囊。</div>'; return; }
+    historyEl.innerHTML = "";
+    history.forEach(function (h) {
+      var row = document.createElement("div");
+      row.className = "hist-item";
+      var hid = document.createElement("span"); hid.className = "hid";
+      hid.textContent = String(h.id).slice(0, 8);
+      var hpv = document.createElement("span"); hpv.className = "hpv";
+      hpv.textContent = h.preview || "(空)";
+      var hst = document.createElement("span"); hst.className = "hst " + h.status;
+      hst.textContent = h.status;
+      row.appendChild(hid); row.appendChild(hpv); row.appendChild(hst);
+      historyEl.appendChild(row);
+    });
+  }
+
+  /* ---------------- shared response handling ---------------- */
+  async function handleCaptureResponse(resp, ctx) {
+    var data = {};
+    try { data = await resp.json(); } catch (e) { /* non-JSON body */ }
+
+    if (resp.status === 201) {
+      var content = ctx.kind === "voice" ? (data.content || "[已转写]") : (ctx.content || "");
+      showResult("ok",
+        ctx.kind === "voice" ? "语音胶囊已保存" : "文字胶囊已保存",
+        content,
+        "ID " + String(data.id || "").slice(0, 8) + " · " + (fmtTime(data.created_at) || "刚刚"));
+      addHistory(data.id, content, data.status || "pending");
+      if (ctx.kind === "text") textInput.value = "";
+      return;
+    }
+    if (resp.status === 200 && data.existing) {
+      var c2 = ctx.content || "(与已存在胶囊内容相同)";
+      showResult("info", "内容此前已保存",
+        c2, "幂等命中，未重复创建 · ID " + String(data.id || "").slice(0, 8));
+      addHistory(data.id, c2, data.status || "pending");
+      if (ctx.kind === "text") textInput.value = "";
+      return;
+    }
+    if (resp.status === 504 || data.status === "pending_retry") {
+      showResult("warn", "转写超时",
+        "转写超时，音频已安全保存，稍后会自动重试。可稍后在 Obsidian 同步中查看。", "");
+      if (data.id) addHistory(data.id, "[音频已保存 · 转写待重试]", "pending_retry");
+      return;
+    }
+    if (resp.status === 401) {
+      showResult("err", "未授权 (401)",
+        "访问令牌无效或缺失。请点右上角 ⚙️ 设置，检查并重新保存访问令牌。", "");
+      return;
+    }
+    showResult("err", "提交失败 (HTTP " + resp.status + ")",
+      (data && data.error) ? data.error : "未知错误，请稍后重试。", "");
+  }
+
+  /* ---------------- recording ---------------- */
+  var recording = false;
+  var mediaRecorder = null, chunks = [], stream = null;
+  var startTs = 0, tickTimer = null, maxTimer = null, currentMime = "";
+
+  function pickMime() {
+    var cands = ["audio/webm;codecs=opus", "audio/webm", "audio/mp4"];
+    if (typeof MediaRecorder === "undefined" || !MediaRecorder.isTypeSupported) return "";
+    for (var i = 0; i < cands.length; i++) {
+      if (MediaRecorder.isTypeSupported(cands[i])) return cands[i];
+    }
+    return "";
+  }
+  function extFor(mime) {
+    if (mime.indexOf("mp4") > -1) return "mp4";
+    if (mime.indexOf("ogg") > -1) return "ogg";
+    return "webm";
+  }
+  function fmtClock(sec) {
+    var m = Math.floor(sec / 60), s = sec % 60;
+    return String(m).padStart(2, "0") + ":" + String(s).padStart(2, "0");
+  }
+  function setRecordingUI(on) {
+    recording = on;
+    stage.classList.toggle("recording", on);
+    recBtn.querySelector(".label").textContent = on ? "点击停止" : "按住说话";
+    recBtn.querySelector(".mic").textContent = on ? "⏹️" : "🎙️";
+    timerEl.classList.toggle("idle", !on);
+    if (on) stageSub.textContent = "正在录音…最长 30 秒";
+    else { timerEl.textContent = "00:00"; refreshTokenGate(); }
+  }
+  function setBusy(on, label) {
+    recBtn.disabled = on;
+    sendTextBtn.disabled = on;
+    if (on) { stageSub.textContent = label || "处理中…"; recBtn.querySelector(".label").textContent = label || "…"; }
+  }
+
+  async function startRecording() {
+    if (!getToken()) { settings.classList.add("open"); toast("请先在设置中填入访问令牌"); return; }
+    if (typeof MediaRecorder === "undefined") { showResult("err", "不支持录音", "当前浏览器不支持 MediaRecorder，请改用文字胶囊。", ""); return; }
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    } catch (e) {
+      showResult("err", "无法录音", "需要麦克风权限才能录音，请在浏览器设置中允许后重试。", "");
+      return;
+    }
+    currentMime = pickMime();
+    chunks = [];
+    try {
+      mediaRecorder = currentMime
+        ? new MediaRecorder(stream, { mimeType: currentMime })
+        : new MediaRecorder(stream);
+    } catch (e) {
+      mediaRecorder = new MediaRecorder(stream);
+    }
+    if (!currentMime && mediaRecorder.mimeType) currentMime = mediaRecorder.mimeType;
+    mediaRecorder.ondataavailable = function (e) { if (e.data && e.data.size) chunks.push(e.data); };
+    mediaRecorder.onstop = onRecordingStop;
+    mediaRecorder.start();
+    startTs = Date.now();
+    setRecordingUI(true);
+    timerEl.textContent = "00:00";
+    tickTimer = setInterval(function () {
+      timerEl.textContent = fmtClock(Math.floor((Date.now() - startTs) / 1000));
+    }, 250);
+    maxTimer = setTimeout(function () {
+      if (mediaRecorder && mediaRecorder.state === "recording") {
+        stopRecording();
+        toast("已到最长录音时长");
+      }
+    }, MAX_MS);
+  }
+
+  function stopRecording() {
+    clearInterval(tickTimer); tickTimer = null;
+    clearTimeout(maxTimer); maxTimer = null;
+    if (mediaRecorder && mediaRecorder.state !== "inactive") {
+      try { mediaRecorder.stop(); } catch (e) { /* already stopped */ }
+    }
+    setRecordingUI(false);
+  }
+
+  function onRecordingStop() {
+    if (stream) { stream.getTracks().forEach(function (t) { t.stop(); }); stream = null; }
+    var type = currentMime || (mediaRecorder && mediaRecorder.mimeType) || "audio/webm";
+    var blob = new Blob(chunks, { type: type });
+    chunks = [];
+    if (!blob.size) { showResult("err", "没有录到音频", "没有采集到音频数据，请重试。", ""); return; }
+    uploadAudio(blob, type);
+  }
+
+  async function uploadAudio(blob, type) {
+    var token = getToken();
+    if (!token) { settings.classList.add("open"); toast("请先在设置中填入访问令牌"); return; }
+    var ext = extFor(type);
+    var fd = new FormData();
+    // API 规范：multipart/form-data，字段名 audio
+    fd.append("audio", blob, "capsules_" + Date.now() + "." + ext);
+    fd.append("source", "web");
+    fd.append("tags", "pwa");
+    setBusy(true, "转写中…");
+    try {
+      var resp = await fetch(CAPTURE_URL, {
+        method: "POST",
+        headers: { "Authorization": authHeader() }, // 不要手动设 Content-Type，交给浏览器带 boundary
+        body: fd
+      });
+      await handleCaptureResponse(resp, { kind: "voice" });
+    } catch (e) {
+      showResult("err", "网络错误", "上传失败：" + (e && e.message ? e.message : "请求未完成") + "。音频未发送成功，请重试。", "");
+    } finally {
+      setBusy(false);
+      setRecordingUI(false);
+    }
+  }
+
+  recBtn.addEventListener("click", function () {
+    if (recBtn.disabled) return;
+    if (recording) stopRecording();
+    else startRecording();
+  });
+
+  /* ---------------- text capsule ---------------- */
+  async function sendText() {
+    var content = textInput.value.trim();
+    if (!content) { toast("请输入内容"); return; }
+    var token = getToken();
+    if (!token) { settings.classList.add("open"); toast("请先在设置中填入访问令牌"); return; }
+    setBusy(true, "发送中…");
+    sendTextBtn.textContent = "发送中…";
+    try {
+      var resp = await fetch(CAPTURE_URL, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": authHeader()
+        },
+        body: JSON.stringify({ content: content, source: "web", tags: "pwa" })
+      });
+      await handleCaptureResponse(resp, { kind: "text", content: content });
+    } catch (e) {
+      showResult("err", "网络错误", "发送失败：" + (e && e.message ? e.message : "请求未完成") + "。", "");
+    } finally {
+      setBusy(false);
+      setRecordingUI(false);
+      sendTextBtn.textContent = "发送";
+    }
+  }
+  sendTextBtn.addEventListener("click", sendText);
+
+  /* ---------------- init ---------------- */
+  refreshTokenGate();
+  renderHistory();
+
+  if ("serviceWorker" in navigator) {
+    window.addEventListener("load", function () {
+      navigator.serviceWorker.register("/sw.js").catch(function (err) {
+        console.warn("Service Worker 注册失败", err);
+      });
+    });
+  }
+})();
+</script>
+</body>
+</html>

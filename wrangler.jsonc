@@ -17,5 +17,13 @@
   ],
   // Placeholder only. Local dev reads AUTH_TOKEN from .dev.vars (gitignored).
   // Production: `wrangler secret put AUTH_TOKEN` overrides this at deploy time.
-  "vars": {}
+  "vars": {},
+
+  // Phase 2 — PWA 录音前端。静态文件由 Assets 直接提供（index.html / manifest /
+  // icons / sw.js），/api/* 仍由 src/index.ts 的 Worker 处理：静态请求命中资源即返回、
+  // 不进 Worker；未命中的路径（/api/*）才调用 Worker。无需额外路由代码。
+  "assets": {
+    "directory": "./public",
+    "binding": "ASSETS"
+  }
 }
