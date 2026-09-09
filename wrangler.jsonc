@@ -17,5 +17,5 @@
   ],
   // Placeholder only. Local dev reads AUTH_TOKEN from .dev.vars (gitignored).
   // Production: `wrangler secret put AUTH_TOKEN` overrides this at deploy time.
-  "vars": { "AUTH_TOKEN": "dev-placeholder" }
+  "vars": {}
 }
