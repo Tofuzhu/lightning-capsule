@@ -15,7 +15,7 @@
  *
  * AUDIO PIPELINE (硬红线 #1 — 防超时 / 零丢失)
  *   1. Stream the uploaded Blob straight into R2 (never buffered fully before persistence).
- *   2. Only after R2 confirms the write do we call Whisper, guarded by AbortSignal.timeout(25000)
+ *   2. Only after R2 confirms the write do we call Whisper, guarded by AbortSignal.timeout(60000)
  *      AND a Promise.race backstop timer.
  *   3. Success -> row with status='pending'.
  *   4. Whisper timeout / failure -> row with status='pending_retry' (audio_url points at the
@@ -42,8 +42,17 @@ export interface Env {
   AUTH_TOKEN: string;
 }
 
-const WHISPER_MODEL = "@cf/openai/whisper";
-const WHISPER_TIMEOUT_MS = 25_000;
+// large-v3-turbo: 显著优于默认 whisper (base/small 级)，$0.00051/min (仅贵 13%)。
+// language 显式指定 "zh" 避免自动语言检测失误——中文准确率提升最大的一招。
+// 关键：该模型的 `audio` 入参 schema 是 anyOf[ base64 string | {body,contentType} ]，
+// 不接受默认 whisper 那种 number[] 字节数组 —— 传数组会立即 5006 Type mismatch 报错。
+const WHISPER_MODEL = "@cf/openai/whisper-large-v3-turbo";
+const WHISPER_LANGUAGE = "zh";
+// initial_prompt 用一句简体中文，诱导模型输出简体+标点，进一步压中文错字率。
+const WHISPER_INITIAL_PROMPT = "以下是一段普通话录音的转录。";
+// large-v3-turbo 推理明显慢于默认 whisper（冷加载 + 大模型），旧的 25s 上限实测会整体超时。
+// Workers 按 CPU time 计费，等待 AI 推理不消耗 CPU → 放宽到 60s 不会增加成本。
+const WHISPER_TIMEOUT_MS = 60_000;
 
 /* ------------------------------- helpers ---------------------------------- */
 
@@ -56,6 +65,18 @@ function json(body: unknown, status = 200, extraHeaders?: Record<string, string>
 
 function errorResponse(message: string, status: number): Response {
   return json({ error: message }, status);
+}
+
+/** ArrayBuffer -> base64 string. Chunked so a multi-hundred-KB buffer can't blow the
+ *  argument limit of String.fromCharCode(...). */
+function arrayBufferToBase64(buf: ArrayBuffer): string {
+  const bytes = new Uint8Array(buf);
+  const chunk = 0x8000; // 32 KiB per fromCharCode call
+  let binary = "";
+  for (let i = 0; i < bytes.length; i += chunk) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
+  }
+  return btoa(binary);
 }
 
 /** SHA256 -> lowercase hex. */
@@ -97,22 +118,30 @@ function audioExtension(file: File): string {
 }
 
 /**
- * Run Whisper with a hard 25s ceiling.
+ * Run Whisper with a hard 60s ceiling.
  * Belt-and-braces: pass an AbortSignal.timeout AND race a backstop timer, so a binding
  * that ignores the signal still cannot hang the request.
  */
 async function transcribeWithTimeout(env: Env, audio: ArrayBuffer): Promise<string> {
-  const bytes = [...new Uint8Array(audio)];
+  // whisper-large-v3-turbo 只吃 base64 字符串（或 {body,contentType}）—— 传字节数组会 5006 报错。
+  const base64 = arrayBufferToBase64(audio);
   let timer: ReturnType<typeof setTimeout> | undefined;
   const backstop = new Promise<never>((_, reject) => {
     timer = setTimeout(() => reject(new Error("whisper_timeout")), WHISPER_TIMEOUT_MS);
   });
   try {
-    const run = env.AI.run(
+    // run 签名按已知模型列表收窄，large-v3-turbo 不在其中 → 用显式函数签名绕过类型收窄
+    const run = (
+      env.AI.run as (
+        model: string,
+        inputs: Record<string, unknown>,
+        options?: Record<string, unknown>,
+      ) => Promise<{ text?: string }>
+    )(
       WHISPER_MODEL,
-      { audio: bytes },
-      { signal: AbortSignal.timeout(WHISPER_TIMEOUT_MS) } as Record<string, unknown>,
-    ) as Promise<{ text?: string }>;
+      { audio: base64, language: WHISPER_LANGUAGE, initial_prompt: WHISPER_INITIAL_PROMPT },
+      { signal: AbortSignal.timeout(WHISPER_TIMEOUT_MS) },
+    );
     const result = await Promise.race([run, backstop]);
     return (result?.text ?? "").trim();
   } finally {
@@ -158,7 +187,7 @@ async function handleCapture(request: Request, env: Env): Promise<Response> {
       return errorResponse("audio storage failed", 502);
     }
 
-    // (2) transcribe with 25s protection; re-read the bytes from R2 (source of truth)
+    // (2) transcribe with 60s protection; re-read the bytes from R2 (source of truth)
     let transcript: string;
     try {
       const obj = await env.AUDIO_BUCKET.get(key);
