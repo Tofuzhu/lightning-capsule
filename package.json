@@ -1,0 +1,24 @@
+{
+  "name": "lightning-capsule",
+  "version": "1.0.0",
+  "description": "Lightning Capsule — voice/text capsule edge API (Cloudflare Workers + D1 + R2 + Workers AI Whisper)",
+  "private": true,
+  "scripts": {
+    "dev": "wrangler dev --port 8787 --local",
+    "typecheck": "tsc --noEmit",
+    "schema:local": "wrangler d1 execute lightning_capsule_db --file=schema.sql --local --yes",
+    "schema:remote": "wrangler d1 execute lightning_capsule_db --file=schema.sql --remote --yes",
+    "deploy": "wrangler deploy"
+  },
+  "keywords": [],
+  "type": "commonjs",
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20260908.1",
+    "typescript": "^7.0.2",
+    "wrangler": "^4.130.0"
+  },
+  "allowScripts": {
+    "esbuild@0.28.1": true,
+    "workerd@1.20260908.1": true
+  }
+}

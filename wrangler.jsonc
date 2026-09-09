@@ -1,0 +1,21 @@
+{
+  // Lightning Capsule — Phase 1 core API (edge backend)
+  "name": "lightning-capsule",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-09-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "ai": { "binding": "AI" },
+  "r2_buckets": [
+    { "binding": "AUDIO_BUCKET", "bucket_name": "<your-r2-bucket-name>" }
+  ],
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "lightning_capsule_db",
+      "database_id": "<your-d1-database-id>"
+    }
+  ],
+  // Placeholder only. Local dev reads AUTH_TOKEN from .dev.vars (gitignored).
+  // Production: `wrangler secret put AUTH_TOKEN` overrides this at deploy time.
+  "vars": { "AUTH_TOKEN": "dev-placeholder" }
+}
