@@ -9,7 +9,9 @@ Transcription notes:
 - Model `@cf/openai/whisper-large-v3-turbo` — markedly better zh accuracy than the base `@cf/openai/whisper`, ~$0.00051/audio-min.
 - `audio` **must** be passed as a base64 string (schema is `anyOf[string | {body,contentType}]`); the byte-array form that base `whisper` accepts fails fast with `5006 Type mismatch of '/audio'`.
 - `language: "zh"` (ISO 639-1) is set explicitly so the model never mis-detects the language.
-- `initial_prompt` is a short zh sentence to bias output toward Simplified Chinese + punctuation.
+- `task: "transcribe"` is passed explicitly (it is the model default) to rule out any accidental `translate`.
+- `initial_prompt` is a generic zh sentence written **with full-width punctuation** (，。！？、：), unrelated to any real audio (to avoid hallucinating its wording into the result). It biases output toward Simplified Chinese and pulls **sentence-final** punctuation to full-width 「。！？」.
+- **Known limitation — half-width clause comma.** The hosted `whisper-large-v3-turbo` still emits a **half-width `,`** between clauses no matter what `initial_prompt` says (verified against 5 wordings, including a prompt that is nothing but full-width commas). Comma glyph width is not controllable through the exposed params, so `content` may read `今天下午三点,我要…开会。` — full-width period, half-width comma. Left as-is on purpose: no post-hoc string rewriting. Transcription of individual homophones (e.g. 接/借) also varies run-to-run on the hosted model.
 - Whisper guard raised 25s → 60s: turbo's cold-load + larger model needs the headroom, and waiting on AI inference burns no CPU time so there is no cost impact.
 
 ## Endpoints (all require `Authorization: Bearer <AUTH_TOKEN>`)

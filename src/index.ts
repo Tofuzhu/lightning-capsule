@@ -48,8 +48,16 @@ export interface Env {
 // 不接受默认 whisper 那种 number[] 字节数组 —— 传数组会立即 5006 Type mismatch 报错。
 const WHISPER_MODEL = "@cf/openai/whisper-large-v3-turbo";
 const WHISPER_LANGUAGE = "zh";
-// initial_prompt 用一句简体中文，诱导模型输出简体+标点，进一步压中文错字率。
-const WHISPER_INITIAL_PROMPT = "以下是一段普通话录音的转录。";
+// initial_prompt 是一段“上下文前缀”，Whisper 会模仿其书写风格（简繁体 + 标点形态）。
+// 放一句与测试音频无关的通用示例，并显式使用全角中文标点，诱导模型输出简体 + 标点。
+// 实测（large-v3-turbo，Workers AI 托管）：该前缀能把**句末标点**稳定带成全角「。！？」，
+// 但**子句之间的逗号**始终输出半角「,」—— 换过 5 种措辞（含“通篇只有全角逗号”的极端前缀）
+// 均无效，说明托管版模型的逗号形态无法经 initial_prompt 控制。详见 README“Transcription notes”。
+// 注意：示例内容必须与真实音频无关，否则会诱发幻觉（把示例词句写进转录结果）。
+const WHISPER_INITIAL_PROMPT =
+  "以下是一段普通话录音的转录文本，使用规范的全角中文标点符号，例如：逗号、句号、问号和感叹号。他说：这个方案不错！你觉得呢？我们明天再讨论。";
+// task 显式设为 "transcribe"（该模型默认值），杜绝被误当成 translate。
+const WHISPER_TASK = "transcribe";
 // large-v3-turbo 推理明显慢于默认 whisper（冷加载 + 大模型），旧的 25s 上限实测会整体超时。
 // Workers 按 CPU time 计费，等待 AI 推理不消耗 CPU → 放宽到 60s 不会增加成本。
 const WHISPER_TIMEOUT_MS = 60_000;
@@ -139,7 +147,12 @@ async function transcribeWithTimeout(env: Env, audio: ArrayBuffer): Promise<stri
       ) => Promise<{ text?: string }>
     )(
       WHISPER_MODEL,
-      { audio: base64, language: WHISPER_LANGUAGE, initial_prompt: WHISPER_INITIAL_PROMPT },
+      {
+        audio: base64,
+        task: WHISPER_TASK,
+        language: WHISPER_LANGUAGE,
+        initial_prompt: WHISPER_INITIAL_PROMPT,
+      },
       { signal: AbortSignal.timeout(WHISPER_TIMEOUT_MS) },
     );
     const result = await Promise.race([run, backstop]);
