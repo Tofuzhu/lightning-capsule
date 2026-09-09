@@ -107,6 +107,9 @@
     background: linear-gradient(160deg, #f59e0b, #d97706);
     box-shadow: 0 12px 30px -8px rgba(245, 158, 11, 0.5);
     display: grid; place-items: center; gap: 4px; transition: transform 0.1s ease;
+    /* 按住说话：禁掉长按的系统手势（文本选择 / 放大镜 / 上下文菜单）与触摸滚动 */
+    user-select: none; -webkit-user-select: none; -webkit-touch-callout: none;
+    touch-action: none;
   }
   .rec-btn:active { transform: scale(0.97); }
   .rec-btn .mic { font-size: 34px; line-height: 1; }
@@ -199,7 +202,7 @@
       </button>
     </div>
     <div class="timer idle" id="timer">00:00</div>
-    <div class="sub" id="stageSub">点击按钮开始录音，最长 30 秒</div>
+    <div class="sub" id="stageSub">按住按钮开始录音，最长 30 秒</div>
   </section>
 
   <section class="panel result" id="result">
@@ -266,7 +269,7 @@
       stageSub.textContent = "请先在设置中填入访问令牌";
       recBtn.disabled = false; // allow click -> will prompt to open settings
     } else if (!recording) {
-      stageSub.textContent = "点击按钮开始录音，最长 30 秒";
+      stageSub.textContent = "按住按钮开始录音，最长 30 秒";
     }
   }
 
@@ -358,6 +361,8 @@
   var recording = false;
   var mediaRecorder = null, chunks = [], stream = null;
   var startTs = 0, tickTimer = null, maxTimer = null, currentMime = "";
+  var pressActive = false;   // 手指/鼠标当前是否按住录音键
+  var discardTake = false;   // 本次录音是否因误触（按住过短）而丢弃
 
   function pickMime() {
     var cands = ["audio/webm;codecs=opus", "audio/webm", "audio/mp4"];
@@ -379,7 +384,7 @@
   function setRecordingUI(on) {
     recording = on;
     stage.classList.toggle("recording", on);
-    recBtn.querySelector(".label").textContent = on ? "点击停止" : "按住说话";
+    recBtn.querySelector(".label").textContent = on ? "松开结束" : "按住说话";
     recBtn.querySelector(".mic").textContent = on ? "⏹️" : "🎙️";
     timerEl.classList.toggle("idle", !on);
     if (on) stageSub.textContent = "正在录音…最长 30 秒";
@@ -392,12 +397,20 @@
   }
 
   async function startRecording() {
+    if (recording) return;                 // 已在录音，忽略重复 pointerdown
     if (!getToken()) { settings.classList.add("open"); toast("请先在设置中填入访问令牌"); return; }
     if (typeof MediaRecorder === "undefined") { showResult("err", "不支持录音", "当前浏览器不支持 MediaRecorder，请改用文字胶囊。", ""); return; }
+    discardTake = false;
     try {
       stream = await navigator.mediaDevices.getUserMedia({ audio: true });
     } catch (e) {
       showResult("err", "无法录音", "需要麦克风权限才能录音，请在浏览器设置中允许后重试。", "");
+      return;
+    }
+    // 麦克风授权对话框期间用户可能已松手：放弃本次录音，避免“松手后才开始录”
+    if (!pressActive) {
+      stream.getTracks().forEach(function (t) { t.stop(); });
+      stream = null;
       return;
     }
     currentMime = pickMime();
@@ -428,8 +441,15 @@
   }
 
   function stopRecording() {
+    if (!recording) return;                 // 未在录音（含松手早于授权完成、重复的结束事件），忽略
     clearInterval(tickTimer); tickTimer = null;
     clearTimeout(maxTimer); maxTimer = null;
+    // 误触保护（方案二选一：这里选“丢弃”）：按住不足 250ms 视为误触，
+    // 停止录音但不上传，省掉一次注定为空的 Whisper 转写。
+    if (startTs && Date.now() - startTs < 250) {
+      discardTake = true;
+      toast("按住时间太短");
+    }
     if (mediaRecorder && mediaRecorder.state !== "inactive") {
       try { mediaRecorder.stop(); } catch (e) { /* already stopped */ }
     }
@@ -438,6 +458,7 @@
 
   function onRecordingStop() {
     if (stream) { stream.getTracks().forEach(function (t) { t.stop(); }); stream = null; }
+    if (discardTake) { discardTake = false; chunks = []; return; }   // 误触：丢弃，不上传
     var type = currentMime || (mediaRecorder && mediaRecorder.mimeType) || "audio/webm";
     var blob = new Blob(chunks, { type: type });
     chunks = [];
@@ -470,11 +491,26 @@
     }
   }
 
-  recBtn.addEventListener("click", function () {
+  /* 按住说话：用 Pointer Events 统一处理触摸与鼠标。
+     pointerdown 开始；pointerup / pointercancel / pointerleave（按住后滑出按钮）结束。
+     不用 setPointerCapture —— 捕获后 pointerleave 不会在滑出时触发，与“滑出即停”冲突。
+     原 click 切换监听已移除，避免移动端 click 与 pointer 事件双触发。
+     桌面鼠标：pointerdown/up 天然映射为“按住鼠标录音、松开停止”，无需特判。 */
+  function onPressStart() {
     if (recBtn.disabled) return;
-    if (recording) stopRecording();
-    else startRecording();
-  });
+    pressActive = true;
+    startRecording();
+  }
+  function onPressEnd() {
+    pressActive = false;
+    stopRecording();
+  }
+  recBtn.addEventListener("pointerdown", onPressStart);
+  recBtn.addEventListener("pointerup", onPressEnd);
+  recBtn.addEventListener("pointercancel", onPressEnd);
+  recBtn.addEventListener("pointerleave", onPressEnd);
+  // 防止移动端长按弹出系统文本选择 / 上下文菜单
+  recBtn.addEventListener("contextmenu", function (e) { e.preventDefault(); });
 
   /* ---------------- text capsule ---------------- */
   async function sendText() {
