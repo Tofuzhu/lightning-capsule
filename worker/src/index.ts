@@ -439,6 +439,47 @@ async function handleCapsuleDelete(id: string, env: Env): Promise<Response> {
 }
 
 /**
+ * PATCH /api/capsules/:id — edit a capsule's `content` in place.
+ * Only `content` (and its derived `checksum` + `updated_at`) change. `raw_transcript`
+ * is deliberately kept as the archived original transcript; `status`, `audio_url`,
+ * `source`, `tags`, `created_at`, `export_id` are all left untouched.
+ * Body: `{ "content": "..." }`. Non-JSON body or blank content -> 400. Missing id -> 404.
+ */
+async function handleCapsuleUpdate(id: string, request: Request, env: Env): Promise<Response> {
+  let payload: { content?: unknown };
+  try {
+    payload = await request.json();
+  } catch {
+    return errorResponse("invalid JSON body", 400);
+  }
+  const content = typeof payload.content === "string" ? payload.content.trim() : "";
+  if (!content) return errorResponse("missing content", 400);
+
+  const row = await env.DB.prepare(`SELECT id FROM capsules WHERE id = ? LIMIT 1`)
+    .bind(id)
+    .first<{ id: string }>();
+  if (!row) return errorResponse("not found", 404);
+
+  // checksum tracks content so text-idempotency semantics stay intact after an edit
+  const checksum = await sha256Hex(content);
+  try {
+    await env.DB.prepare(
+      `UPDATE capsules SET content = ?, checksum = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
+    )
+      .bind(content, checksum, id)
+      .run();
+  } catch (dbErr) {
+    console.error("D1 update (capsule content) failed", dbErr);
+    return errorResponse("update failed", 500);
+  }
+
+  const updated = await env.DB.prepare(`SELECT ${CAPSULE_LIST_COLUMNS} FROM capsules WHERE id = ?`)
+    .bind(id)
+    .first();
+  return json(updated, 200);
+}
+
+/**
  * GET /api/capsules/:id/audio — stream the capsule's stored audio back to an
  * authenticated client (the reading UI fetches this with the Bearer header and
  * wraps it in an object URL, since a bare <audio src> cannot send the header).
@@ -497,6 +538,11 @@ export default {
             const delId = safeDecode(rest);
             if (!delId) return errorResponse("bad request", 400);
             return await handleCapsuleDelete(delId, env);
+          }
+          if (request.method === "PATCH" && !rest.includes("/")) {
+            const patchId = safeDecode(rest);
+            if (!patchId) return errorResponse("bad request", 400);
+            return await handleCapsuleUpdate(patchId, request, env);
           }
           return errorResponse("not found", 404);
         }

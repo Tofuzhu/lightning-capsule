@@ -211,6 +211,11 @@
   .cap-detail { display: none; margin-top: 10px; }
   .cap-card.open .cap-detail { display: block; }
   .cap-full { font-size: 14px; white-space: pre-wrap; word-break: break-word; }
+  .cap-edit {
+    width: 100%; min-height: 96px; resize: vertical; padding: 10px; font-size: 14px;
+    line-height: 1.45; border-radius: 10px; border: 1px solid var(--line);
+    background: var(--bg); color: var(--text); font-family: inherit;
+  }
   .cap-raw {
     font-size: 13px; color: var(--muted); white-space: pre-wrap; word-break: break-word;
     margin-top: 8px; padding-top: 8px; border-top: 1px dashed var(--line);
@@ -220,7 +225,7 @@
     font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px;
     color: var(--muted); margin-top: 10px; word-break: break-all;
   }
-  .cap-actions { margin-top: 12px; }
+  .cap-actions { margin-top: 12px; display: flex; gap: 8px; flex-wrap: wrap; }
   .btn-danger {
     background: rgba(248, 113, 113, 0.15); color: var(--err);
     border: 1px solid rgba(248, 113, 113, 0.35);
@@ -839,13 +844,88 @@
 
     var actions = document.createElement("div");
     actions.className = "cap-actions";
+    var edit = document.createElement("button");
+    edit.type = "button";
+    edit.className = "btn btn-ghost";
+    edit.textContent = "编辑";
+    edit.addEventListener("click", function (e) { e.stopPropagation(); startEditCapsule(detail, it); });
+    actions.appendChild(edit);
     var del = document.createElement("button");
     del.type = "button";
     del.className = "btn btn-danger";
     del.textContent = "删除这条胶囊";
-    del.addEventListener("click", function () { confirmDelete(it); });
+    del.addEventListener("click", function (e) { e.stopPropagation(); confirmDelete(it); });
     actions.appendChild(del);
     detail.appendChild(actions);
+  }
+
+  /* Inline content editor: swaps the .cap-full text for a textarea + 保存/取消.
+     Only touches this one card; other cards / toggles keep working. */
+  function startEditCapsule(detail, it) {
+    var full = detail.querySelector(".cap-full");
+    var actions = detail.querySelector(".cap-actions");
+    if (!full || !actions) return;
+
+    var ta = document.createElement("textarea");
+    ta.className = "cap-edit";
+    ta.value = it.content || "";
+    full.replaceWith(ta);
+    ta.focus();
+
+    var editActions = document.createElement("div");
+    editActions.className = "cap-actions";
+    var save = document.createElement("button");
+    save.type = "button";
+    save.className = "btn btn-primary";
+    save.textContent = "保存";
+    var cancel = document.createElement("button");
+    cancel.type = "button";
+    cancel.className = "btn btn-ghost";
+    cancel.textContent = "取消";
+    editActions.appendChild(save);
+    editActions.appendChild(cancel);
+    actions.replaceWith(editActions);
+
+    cancel.addEventListener("click", function (e) { e.stopPropagation(); fillDetail(detail, it); });
+
+    save.addEventListener("click", async function (e) {
+      e.stopPropagation();
+      var next = ta.value.trim();
+      if (!next) { toast("内容不能为空"); return; }
+      if (next === (it.content || "")) { fillDetail(detail, it); return; }
+      save.disabled = true; cancel.disabled = true;
+      save.textContent = "保存中…";
+      try {
+        var resp = await fetch(API_BASE + "/api/capsules/" + encodeURIComponent(it.id), {
+          method: "PATCH",
+          headers: { "Authorization": authHeader(), "Content-Type": "application/json" },
+          body: JSON.stringify({ content: next })
+        });
+        var data = {};
+        try { data = await resp.json(); } catch (e) { /* non-JSON */ }
+        if (resp.status === 404) { toast("这条胶囊已不存在"); removeLogItem(it.id); return; }
+        if (!resp.ok) {
+          throw new Error(resp.status === 401
+            ? "访问令牌无效或缺失（401）。请点右上角 ⚙️ 设置检查并重新保存令牌。"
+            : "保存失败（HTTP " + resp.status + "）" + (data && data.error ? "：" + data.error : ""));
+        }
+        var updated = (data && data.id) ? data : null;
+        for (var i = 0; i < logItems.length; i++) {
+          if (logItems[i].id === it.id) {
+            logItems[i] = updated || Object.assign({}, logItems[i], { content: next });
+            break;
+          }
+        }
+        logError.hidden = true;
+        renderLog();               // rebuilds cards; this one stays expanded with new text
+        toast("已保存");
+      } catch (e) {
+        logError.textContent = (e && e.message) ? e.message : "保存失败，请稍后重试。";
+        logError.hidden = false;
+        save.disabled = false; cancel.disabled = false;
+        save.textContent = "保存";
+      }
+    });
   }
 
   async function loadAudio(id, audioEl) {
