@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Wear Widget metadata (Wear OS 7). Declares the two supported card sizes:
+  SMALL (2x1) and LARGE (2x2). `preferredType` picks the default the picker
+  offers first. Attributes are NOT android-namespaced (custom schema parsed by
+  androidx.glance.wear.core).
+-->
+<wearwidget-provider
+    description="@string/widget_description"
+    icon="@drawable/ic_capsule"
+    label="@string/widget_label"
+    preferredType="@integer/glance_wear_container_type_small">
+
+    <container
+        type="@integer/glance_wear_container_type_small"
+        previewImage="@drawable/widget_preview" />
+
+    <container
+        type="@integer/glance_wear_container_type_large"
+        previewImage="@drawable/widget_preview" />
+
+</wearwidget-provider>

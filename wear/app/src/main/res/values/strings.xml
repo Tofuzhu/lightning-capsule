@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Lightning Capsule</string>
+
+    <string name="hold_to_talk">按住说话</string>
+    <string name="recording">录音中…</string>
+    <string name="release_to_send">松手上传</string>
+    <string name="uploading">上传中…</string>
+    <string name="recorded">✓ 已记录</string>
+    <string name="upload_failed">上传失败，请重试</string>
+    <string name="tap_to_retry">点按重试</string>
+
+    <string name="token_invalid">token 无效</string>
+    <string name="queued_offline">已暂存，待网络恢复后上传</string>
+    <string name="queued_short">已暂存</string>
+    <string name="queue_full">离线队列已满</string>
+    <string name="pending_count">待上传 %1$d 条</string>
+    <string name="draining_count">正在补传 %1$d 条…</string>
+    <string name="retry_now">立即重试</string>
+    <string name="need_mic_permission">需要麦克风权限</string>
+    <string name="grant_permission">授予权限</string>
+    <string name="recording_too_short">录音太短</string>
+    <string name="record_failed">无法录音</string>
+    <string name="hold_to_retry">按住重录</string>
+
+    <!-- v3 quick entries: complication + Wear Widget -->
+    <string name="complication_label">闪念胶囊</string>
+    <string name="complication_description">闪念胶囊 · 按住说话</string>
+    <string name="widget_label">闪念胶囊</string>
+    <string name="widget_description">按住说话，快速记录闪念</string>
+
+    <string name="token_title">输入 AUTH_TOKEN</string>
+    <string name="token_hint">粘贴 Bearer token</string>
+    <string name="save">保存</string>
+</resources>

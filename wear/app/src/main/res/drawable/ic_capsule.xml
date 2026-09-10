@@ -1,0 +1,17 @@
+<!--
+  Monochrome capsule glyph for the complication (MONOCHROMATIC_IMAGE / SMALL_IMAGE
+  ICON) and the Wear Widget. White on a transparent background so the watch face
+  can tint it. A horizontal capsule "pill" with a lightning bolt punched out
+  (evenOdd) — matches the app's "闪念胶囊 / Lightning Capsule" identity.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24"
+    android:tint="?android:attr/colorControlNormal">
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:fillType="evenOdd"
+        android:pathData="M8,4 L16,4 A8,8 0 0 1 16,20 L8,20 A8,8 0 0 1 8,4 Z M13,6 L8.5,12.6 L11.5,12.6 L10.5,18 L15.5,10.6 L12.5,10.6 Z" />
+</vector>
