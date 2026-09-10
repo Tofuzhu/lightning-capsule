@@ -36,6 +36,9 @@ class CapsuleComplicationService : SuspendingComplicationDataSourceService() {
             getString(R.string.complication_description),
         ).build()
         val icon = Icon.createWithResource(this, R.drawable.ic_capsule)
+        // SMALL_IMAGE (ICON) may be rendered untinted by the watch face, so it
+        // uses a vivid, pre-colored variant instead of the plain white glyph.
+        val vividIcon = Icon.createWithResource(this, R.drawable.ic_capsule_vivid)
         val tapAction = launchIntent()
 
         return when (type) {
@@ -47,7 +50,7 @@ class CapsuleComplicationService : SuspendingComplicationDataSourceService() {
 
             ComplicationType.SMALL_IMAGE ->
                 SmallImageComplicationData.Builder(
-                    smallImage = SmallImage.Builder(icon, SmallImageType.ICON).build(),
+                    smallImage = SmallImage.Builder(vividIcon, SmallImageType.ICON).build(),
                     contentDescription = description,
                 ).setTapAction(tapAction).build()
 
