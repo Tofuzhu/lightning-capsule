@@ -25,6 +25,7 @@
     --err: #f87171;
   }
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  [hidden] { display: none !important; }
   html, body { margin: 0; padding: 0; }
   body {
     background: radial-gradient(1200px 600px at 50% -10%, #16233d 0%, var(--bg) 60%);
@@ -165,6 +166,79 @@
 
   footer { text-align: center; font-size: 11px; color: var(--muted); padding: 6px 0 2px; word-break: break-all; }
 
+  /* ---- view switch + 记录 view ---- */
+  #recordView { display: flex; flex-direction: column; gap: 18px; }
+  .segmented {
+    display: flex; gap: 4px; padding: 4px;
+    background: var(--bg-2); border: 1px solid var(--line); border-radius: 12px;
+  }
+  .seg-btn {
+    flex: 1; appearance: none; border: 0; background: transparent; color: var(--muted);
+    font-size: 14px; font-weight: 600; padding: 9px 0; border-radius: 9px; cursor: pointer;
+  }
+  .seg-btn.active { background: var(--card); color: var(--text); }
+  .seg-btn:active { transform: scale(0.98); }
+
+  .log-search {
+    width: 100%; padding: 11px 12px; border-radius: 10px; border: 1px solid var(--line);
+    background: var(--bg); color: var(--text); font-size: 15px; margin-bottom: 12px;
+    font-family: inherit;
+  }
+  .log-list { display: flex; flex-direction: column; gap: 8px; }
+  .log-note, .log-empty, .log-loading { font-size: 13px; color: var(--muted); padding: 10px 2px; }
+  .log-error {
+    font-size: 13px; color: var(--err); background: rgba(248, 113, 113, 0.12);
+    border: 1px solid rgba(248, 113, 113, 0.3); border-radius: 10px; padding: 10px 12px;
+    margin-bottom: 10px; white-space: pre-wrap; word-break: break-word;
+  }
+  .log-more-row { display: flex; justify-content: center; margin-top: 12px; }
+
+  .cap-card {
+    background: var(--bg-2); border: 1px solid var(--line); border-radius: 12px;
+    padding: 12px; cursor: pointer;
+  }
+  .cap-card:active { transform: scale(0.995); }
+  .cap-preview {
+    font-size: 14px; line-height: 1.45; white-space: pre-wrap; word-break: break-word;
+    display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;
+  }
+  .cap-card.open .cap-preview { display: none; }
+  .cap-meta { display: flex; align-items: center; gap: 8px; margin-top: 8px; font-size: 12px; color: var(--muted); }
+  .cap-src {
+    font-size: 11px; font-weight: 700; padding: 2px 7px; border-radius: 999px;
+    background: rgba(147, 160, 184, 0.18); color: var(--muted);
+  }
+  .cap-detail { display: none; margin-top: 10px; }
+  .cap-card.open .cap-detail { display: block; }
+  .cap-full { font-size: 14px; white-space: pre-wrap; word-break: break-word; }
+  .cap-raw {
+    font-size: 13px; color: var(--muted); white-space: pre-wrap; word-break: break-word;
+    margin-top: 8px; padding-top: 8px; border-top: 1px dashed var(--line);
+  }
+  .cap-detail audio { width: 100%; margin-top: 10px; }
+  .cap-sub {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px;
+    color: var(--muted); margin-top: 10px; word-break: break-all;
+  }
+  .cap-actions { margin-top: 12px; }
+  .btn-danger {
+    background: rgba(248, 113, 113, 0.15); color: var(--err);
+    border: 1px solid rgba(248, 113, 113, 0.35);
+  }
+
+  .skeleton {
+    height: 66px; border-radius: 12px; background: var(--bg-2);
+    border: 1px solid var(--line); position: relative; overflow: hidden;
+  }
+  .skeleton + .skeleton { margin-top: 8px; }
+  .skeleton::after {
+    content: ""; position: absolute; inset: 0;
+    background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.05), transparent);
+    animation: sk 1.2s ease-in-out infinite;
+  }
+  @keyframes sk { 0% { transform: translateX(-100%); } 100% { transform: translateX(100%); } }
+  @media (prefers-reduced-motion: reduce) { .skeleton::after { animation: none; } }
+
   .toast {
     position: fixed; left: 50%; bottom: calc(24px + env(safe-area-inset-bottom));
     transform: translateX(-50%) translateY(20px); opacity: 0;
@@ -194,6 +268,12 @@
     <p class="hint-inline">令牌仅保存在本设备浏览器（localStorage: <code>lc_auth_token</code>），每次请求自动带上 <code>Authorization: Bearer …</code>。</p>
   </section>
 
+  <nav class="segmented" id="viewTabs">
+    <button type="button" class="seg-btn active" data-view="record" id="tabRecord">录制</button>
+    <button type="button" class="seg-btn" data-view="log" id="tabLog">记录</button>
+  </nav>
+
+  <div id="recordView">
   <section class="stage" id="stage">
     <div class="rec-wrap">
       <span class="pulse"></span><span class="pulse"></span><span class="pulse"></span>
@@ -225,6 +305,20 @@
     <h2>本次会话历史</h2>
     <div class="history" id="history"><div class="empty">还没有提交过胶囊。</div></div>
   </section>
+  </div><!-- /recordView -->
+
+  <section class="panel" id="logView" hidden>
+    <h2>记录</h2>
+    <input id="logSearch" class="log-search" type="search" placeholder="搜索正文…"
+      autocomplete="off" autocapitalize="off" spellcheck="false" />
+    <div id="logTokenGate" class="log-note" hidden>还没配置访问令牌。请点右上角 ⚙️ 设置填入 <code>AUTH_TOKEN</code> 后再查看记录。</div>
+    <div id="logError" class="log-error" hidden></div>
+    <div id="logList" class="log-list"></div>
+    <div id="logEmpty" class="log-empty" hidden>还没有胶囊</div>
+    <div id="logMoreRow" class="log-more-row" hidden>
+      <button type="button" class="btn btn-ghost" id="logMore">加载更多</button>
+    </div>
+  </section>
 
   <footer id="footer">API: —</footer>
 </div>
@@ -247,6 +341,11 @@
   var result = $("result"), resultTag = $("resultTag"), resultBody = $("resultBody"), resultMeta = $("resultMeta");
   var textInput = $("textInput"), sendTextBtn = $("sendText");
   var historyEl = $("history"), toastEl = $("toast"), footer = $("footer");
+  var tabRecord = $("tabRecord"), tabLog = $("tabLog");
+  var recordView = $("recordView"), logView = $("logView");
+  var logSearch = $("logSearch"), logList = $("logList");
+  var logTokenGate = $("logTokenGate"), logError = $("logError");
+  var logEmpty = $("logEmpty"), logMoreRow = $("logMoreRow"), logMore = $("logMore");
 
   footer.textContent = "API: " + API_BASE;
 
@@ -262,6 +361,7 @@
     settings.classList.remove("open");
     toast("已保存访问令牌");
     refreshTokenGate();
+    if (!logView.hidden) enterLogView();
   });
 
   function refreshTokenGate() {
@@ -539,6 +639,281 @@
     }
   }
   sendTextBtn.addEventListener("click", sendText);
+
+  /* ---------------- 记录 view (list / search / detail / delete) ---------------- */
+  var LOG_LIMIT = 30;
+  var logItems = [], logOffset = 0, logTotal = 0, logHasMore = false;
+  var logQuery = "", logBusy = false, logLoadedOnce = false;
+  var logExpanded = Object.create(null);   // id -> true
+  var logAudioURLs = Object.create(null);  // id -> object URL (revoked on reset / delete)
+  var logSearchTimer = null;
+
+  function setView(view) {
+    var isLog = view === "log";
+    tabRecord.classList.toggle("active", !isLog);
+    tabLog.classList.toggle("active", isLog);
+    recordView.hidden = isLog;
+    logView.hidden = !isLog;
+    if (isLog) enterLogView();
+  }
+  tabRecord.addEventListener("click", function () { setView("record"); });
+  tabLog.addEventListener("click", function () { setView("log"); });
+
+  function enterLogView() {
+    if (!getToken()) {
+      logTokenGate.hidden = false;
+      logError.hidden = true;
+      logMoreRow.hidden = true;
+      logEmpty.hidden = true;
+      logList.innerHTML = "";
+      return;
+    }
+    logTokenGate.hidden = true;
+    if (!logLoadedOnce) loadLog(true);
+  }
+
+  function releaseAudioURLs() {
+    for (var k in logAudioURLs) {
+      try { URL.revokeObjectURL(logAudioURLs[k]); } catch (e) { /* noop */ }
+    }
+    logAudioURLs = Object.create(null);
+  }
+
+  function showLogSkeleton() {
+    var html = "";
+    for (var i = 0; i < 3; i++) html += '<div class="skeleton"></div>';
+    logList.innerHTML = html;
+  }
+
+  async function loadLog(reset) {
+    if (logBusy) return;
+    if (!getToken()) { enterLogView(); return; }
+    logBusy = true;
+    logError.hidden = true;
+    if (reset) {
+      logOffset = 0;
+      logItems = [];
+      logExpanded = Object.create(null);
+      releaseAudioURLs();
+      logEmpty.hidden = true;
+      logMoreRow.hidden = true;
+      showLogSkeleton();
+    } else {
+      logMore.disabled = true;
+      logMore.textContent = "加载中…";
+    }
+    try {
+      var url = API_BASE + "/api/capsules?limit=" + LOG_LIMIT + "&offset=" + logOffset;
+      if (logQuery) url += "&q=" + encodeURIComponent(logQuery);
+      var resp = await fetch(url, { headers: { "Authorization": authHeader() } });
+      var data = {};
+      try { data = await resp.json(); } catch (e) { /* non-JSON */ }
+      if (!resp.ok) {
+        throw new Error(resp.status === 401
+          ? "访问令牌无效或缺失（401）。请点右上角 ⚙️ 设置检查并重新保存令牌。"
+          : "加载失败（HTTP " + resp.status + "）" + (data && data.error ? "：" + data.error : ""));
+      }
+      var items = (data && data.items) || [];
+      logItems = reset ? items : logItems.concat(items);
+      logTotal = (data && typeof data.total === "number") ? data.total : logItems.length;
+      logOffset = logItems.length;
+      logHasMore = !!(data && data.has_more);
+      logLoadedOnce = true;
+      renderLog();
+    } catch (e) {
+      if (reset) logList.innerHTML = "";
+      logError.textContent = (e && e.message) ? e.message : "加载失败，请稍后重试。";
+      logError.hidden = false;
+      logEmpty.hidden = true;
+      logMoreRow.hidden = !logHasMore;
+    } finally {
+      logBusy = false;
+      logMore.disabled = false;
+      logMore.textContent = "加载更多";
+    }
+  }
+
+  function renderLog() {
+    logList.innerHTML = "";
+    if (!logItems.length) {
+      logEmpty.hidden = false;
+      logMoreRow.hidden = true;
+      return;
+    }
+    logEmpty.hidden = true;
+    logItems.forEach(function (it) { logList.appendChild(buildCard(it)); });
+    logMoreRow.hidden = !logHasMore;
+  }
+
+  function srcLabel(src) {
+    var known = { web: "web", watch: "watch", extension: "extension", terminal: "terminal", pwa: "web" };
+    if (!src) return "unknown";
+    return known[String(src).toLowerCase()] || String(src);
+  }
+  function parseTs(s) {
+    if (!s) return null;
+    var m = String(s).match(/^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2}):(\d{2})/);
+    if (m) return new Date(Date.UTC(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +m[6]));
+    var d = new Date(String(s));
+    return isNaN(d.getTime()) ? null : d;
+  }
+  function pad2(n) { return String(n).padStart(2, "0"); }
+  function shortTime(s) {
+    var d = parseTs(s);
+    if (!d) return String(s || "");
+    var now = new Date();
+    var today = d.getFullYear() === now.getFullYear() &&
+      d.getMonth() === now.getMonth() && d.getDate() === now.getDate();
+    var hm = pad2(d.getHours()) + ":" + pad2(d.getMinutes());
+    return today ? hm : (pad2(d.getMonth() + 1) + "-" + pad2(d.getDate()) + " " + hm);
+  }
+  function fullTime(s) {
+    var d = parseTs(s);
+    if (!d) return String(s || "");
+    return d.getFullYear() + "-" + pad2(d.getMonth() + 1) + "-" + pad2(d.getDate()) + " " +
+      pad2(d.getHours()) + ":" + pad2(d.getMinutes()) + ":" + pad2(d.getSeconds());
+  }
+
+  function buildCard(it) {
+    var card = document.createElement("div");
+    card.className = "cap-card" + (logExpanded[it.id] ? " open" : "");
+
+    var preview = document.createElement("div");
+    preview.className = "cap-preview";
+    preview.textContent = it.content || "(空)";
+    card.appendChild(preview);
+
+    var meta = document.createElement("div");
+    meta.className = "cap-meta";
+    var src = document.createElement("span");
+    src.className = "cap-src";
+    src.textContent = srcLabel(it.source);
+    var time = document.createElement("span");
+    time.textContent = shortTime(it.created_at);
+    meta.appendChild(src);
+    meta.appendChild(time);
+    card.appendChild(meta);
+
+    var detail = document.createElement("div");
+    detail.className = "cap-detail";
+    if (logExpanded[it.id]) fillDetail(detail, it);
+    card.appendChild(detail);
+
+    card.addEventListener("click", function (e) {
+      if (e.target.closest(".cap-detail")) return;   // interactions inside detail don't toggle
+      var open = !logExpanded[it.id];
+      if (open) { logExpanded[it.id] = true; fillDetail(detail, it); }
+      else { delete logExpanded[it.id]; detail.innerHTML = ""; }
+      card.classList.toggle("open", open);
+    });
+    return card;
+  }
+
+  function fillDetail(detail, it) {
+    detail.innerHTML = "";
+
+    var full = document.createElement("div");
+    full.className = "cap-full";
+    full.textContent = it.content || "(空)";
+    detail.appendChild(full);
+
+    if (it.raw_transcript && it.raw_transcript !== it.content) {
+      var raw = document.createElement("div");
+      raw.className = "cap-raw";
+      raw.textContent = "原始转写：" + it.raw_transcript;
+      detail.appendChild(raw);
+    }
+
+    if (it.audio_url) {
+      var audio = document.createElement("audio");
+      audio.controls = true;
+      audio.preload = "none";
+      detail.appendChild(audio);
+      loadAudio(it.id, audio);
+    }
+
+    var sub = document.createElement("div");
+    sub.className = "cap-sub";
+    sub.textContent = fullTime(it.created_at) + " · id " + it.id;
+    detail.appendChild(sub);
+
+    var actions = document.createElement("div");
+    actions.className = "cap-actions";
+    var del = document.createElement("button");
+    del.type = "button";
+    del.className = "btn btn-danger";
+    del.textContent = "删除这条胶囊";
+    del.addEventListener("click", function () { confirmDelete(it); });
+    actions.appendChild(del);
+    detail.appendChild(actions);
+  }
+
+  async function loadAudio(id, audioEl) {
+    if (logAudioURLs[id]) { audioEl.src = logAudioURLs[id]; return; }
+    try {
+      var resp = await fetch(API_BASE + "/api/capsules/" + encodeURIComponent(id) + "/audio", {
+        headers: { "Authorization": authHeader() }
+      });
+      if (!resp.ok) throw new Error("audio " + resp.status);
+      var objUrl = URL.createObjectURL(await resp.blob());
+      logAudioURLs[id] = objUrl;
+      audioEl.src = objUrl;
+    } catch (e) {
+      var note = document.createElement("div");
+      note.className = "cap-sub";
+      note.textContent = "音频加载失败";
+      if (audioEl.parentNode) audioEl.parentNode.replaceChild(note, audioEl);
+    }
+  }
+
+  async function confirmDelete(it) {
+    if (!window.confirm("确定删除这条胶囊？删除后无法恢复。")) return;
+    try {
+      var resp = await fetch(API_BASE + "/api/capsules/" + encodeURIComponent(it.id), {
+        method: "DELETE",
+        headers: { "Authorization": authHeader() }
+      });
+      var data = {};
+      try { data = await resp.json(); } catch (e) { /* non-JSON */ }
+      if (resp.status === 404) { toast("这条胶囊已不存在"); removeLogItem(it.id); return; }
+      if (!resp.ok || !data.deleted) {
+        toast("删除失败" + (data && data.error ? "：" + data.error : "（HTTP " + resp.status + "）"));
+        return;
+      }
+      removeLogItem(it.id);
+      toast(data.audio_removed ? "已删除（含音频）" : "已删除");
+    } catch (e) {
+      toast("删除失败：" + (e && e.message ? e.message : "网络错误"));
+    }
+  }
+
+  function removeLogItem(id) {
+    var idx = -1;
+    for (var i = 0; i < logItems.length; i++) { if (logItems[i].id === id) { idx = i; break; } }
+    if (idx === -1) return;
+    logItems.splice(idx, 1);
+    delete logExpanded[id];
+    if (logAudioURLs[id]) {
+      try { URL.revokeObjectURL(logAudioURLs[id]); } catch (e) { /* noop */ }
+      delete logAudioURLs[id];
+    }
+    logTotal = Math.max(0, logTotal - 1);
+    logOffset = Math.max(0, logOffset - 1);
+    renderLog();
+  }
+
+  logSearch.addEventListener("input", function () {
+    clearTimeout(logSearchTimer);
+    logSearchTimer = setTimeout(function () {
+      var next = logSearch.value.trim();
+      if (next === logQuery) return;
+      logQuery = next;
+      loadLog(true);
+    }, 300);
+  });
+  logMore.addEventListener("click", function () {
+    if (logHasMore && !logBusy) loadLog(false);
+  });
 
   /* ---------------- init ---------------- */
   refreshTokenGate();
