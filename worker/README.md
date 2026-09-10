@@ -29,8 +29,9 @@ Unknown routes / bad token → JSON `{error}` with 404 / 401. Errors never leak 
 
 ```sh
 npm install
+cp wrangler.jsonc.example wrangler.jsonc   # then fill in your D1 id + R2 bucket name (gitignored)
 npm run schema:local          # apply schema.sql to the local D1
-echo "AUTH_TOKEN=$(openssl rand -hex 24)" > .dev.vars   # already present in this checkout
+echo "AUTH_TOKEN=$(openssl rand -hex 24)" > .dev.vars   # gitignored; never commit
 npm run dev                    # wrangler dev on :8787 (local D1 + local R2)
 ```
 
@@ -38,12 +39,17 @@ Note: in `wrangler dev --local`, `env.AI` reports **"not supported"** (this Wran
 proxy Workers AI locally), so the Whisper *success* path only runs against real infra. The
 timeout/failure fallback (`pending_retry` + 504, audio already in R2) is fully exercised locally.
 
-## Production deploy (acceptance party)
+## Production deploy
+
+Full walkthrough (accounts, billing, three clients): [`../docs/SELF-HOSTING.md`](../docs/SELF-HOSTING.md).
 
 1. **Enable R2** in the Cloudflare dashboard for your own Cloudflare account
-   (`wrangler r2 bucket create <your-r2-bucket-name>` currently returns code 10042 "enable R2").
-2. `npm run schema:remote` (already applied once to DB `<your-d1-database-id>`).
-3. `wrangler secret put AUTH_TOKEN` — overrides the `dev-placeholder` var in `wrangler.jsonc`.
-4. `npm run deploy`.
+   (a first `wrangler r2 bucket create <your-r2-bucket-name>` returns code 10042 "enable R2" until you do).
+2. Create the D1 database (`wrangler d1 create lightning_capsule_db`) and the R2 bucket, then put
+   the `database_id` and `bucket_name` into your local `wrangler.jsonc` (copied from `wrangler.jsonc.example`).
+3. `npm run schema:remote` — apply `schema.sql` to the remote D1.
+4. `wrangler secret put AUTH_TOKEN` — overrides the `dev-placeholder` var in `wrangler.jsonc`.
+5. `npm run deploy`.
 
 `.dev.vars` holds the local dev token and is gitignored — never commit it.
+`wrangler.jsonc` is also gitignored (it carries real resource ids); the repo ships `wrangler.jsonc.example`.

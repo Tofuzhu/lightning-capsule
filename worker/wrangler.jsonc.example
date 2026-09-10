@@ -1,5 +1,12 @@
 {
-  // Lightning Capsule — Phase 1 core API (edge backend)
+  // ---------------------------------------------------------------------------
+  // 自建部署模板 —— 复制本文件为 `wrangler.jsonc`（同目录，已被 .gitignore 忽略），
+  // 再把下面两个 <...> 占位符换成你自己的真实资源：
+  //   1. d1_databases[0].database_id  ← `wrangler d1 create lightning_capsule_db` 的输出
+  //   2. r2_buckets[0].bucket_name    ← 你 `wrangler r2 bucket create <名字>` 用的桶名
+  // 真实的 wrangler.jsonc 不会进 git，仓库里只保留这份不含真实 id 的模板。
+  // 详见 docs/SELF-HOSTING.md。
+  // ---------------------------------------------------------------------------
   "name": "lightning-capsule",
   "main": "src/index.ts",
   "compatibility_date": "2026-09-01",
@@ -17,6 +24,7 @@
   ],
   // Placeholder only. Local dev reads AUTH_TOKEN from .dev.vars (gitignored).
   // Production: `wrangler secret put AUTH_TOKEN` overrides this at deploy time.
+  // 必须保持空对象：vars 里放 AUTH_TOKEN 占位会覆盖 secret 导致线上 401。
   "vars": {},
 
   // Phase 2 — PWA 录音前端。静态文件由 Assets 直接提供（index.html / manifest /

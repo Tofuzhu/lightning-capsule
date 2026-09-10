@@ -4,7 +4,8 @@
 
 - 目标设备：Google Pixel Watch 4，Wear OS 7（Android 17 / API 37）
 - 侧载安装，不上架 Play Store
-- 后端 API（已存在，本项目不改动）：`https://<your-subdomain>.workers.dev`
+- 后端 API：`https://<your-subdomain>.workers.dev`（自建，见 [`../docs/SELF-HOSTING.md`](../docs/SELF-HOSTING.md)）。
+  把 `CapsuleUploader.kt` 里的 `BASE_URL` 换成你自己的 Worker 域名后重新 `./gradlew assembleDebug`。
 
 ---
 

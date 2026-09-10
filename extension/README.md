@@ -8,6 +8,10 @@
 数据发往后端 `POST https://<your-subdomain>.workers.dev/api/capture`
 （`source: "extension"`）。
 
+> 自建部署：把 `background.js` / `popup.js` 顶部的 `API_URL` 和 `manifest.json` 的
+> `host_permissions` 里的 `<your-subdomain>.workers.dev` 换成你自己的 Worker 域名，
+> 再重新“加载已解压的扩展”。完整步骤见 [`../docs/SELF-HOSTING.md`](../docs/SELF-HOSTING.md)。
+
 ## 安装（加载已解压的扩展）
 
 1. 打开 `chrome://extensions`（Edge 为 `edge://extensions`）

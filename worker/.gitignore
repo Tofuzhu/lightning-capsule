@@ -2,3 +2,6 @@ node_modules/
 .wrangler/
 .dev.vars
 *.log
+
+# 自建部署：真实资源 id 只放本地这份，用 wrangler.jsonc.example 作模板
+wrangler.jsonc

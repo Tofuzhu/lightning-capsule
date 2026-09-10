@@ -1,6 +1,8 @@
 // Popup UI: token setup, quick text capture, push-to-talk audio capture.
 // The auth token is stored only in chrome.storage.local and is never logged.
 
+// 自建部署：把下面的域名换成你自己的 Worker 域名（wrangler deploy 后拿到），
+// 并同步修改 manifest.json 的 host_permissions。见 docs/SELF-HOSTING.md 第 E 节。
 const API_URL = "https://<your-subdomain>.workers.dev/api/capture";
 const TOKEN_KEY = "auth_token";
 const SOURCE = "extension";

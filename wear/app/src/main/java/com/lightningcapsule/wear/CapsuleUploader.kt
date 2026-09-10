@@ -71,6 +71,8 @@ class CapsuleUploader {
     }
 
     private companion object {
+        // 自建部署：换成你自己的 Worker 域名（wrangler deploy 后拿到），
+        // 然后 ./gradlew assembleDebug 重新侧载。见 docs/SELF-HOSTING.md 第 E 节。
         const val BASE_URL = "https://<your-subdomain>.workers.dev"
     }
 }

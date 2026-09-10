@@ -12,8 +12,18 @@
 
 ## 快速体验
 
-- 生产网页端：https://<your-subdomain>.workers.dev（PWA，可安装到手机桌面）
-- 各端详细说明见对应目录 README
+本项目没有对外开放的公共实例——作者自己的部署仅为个人 / 演示用途，不接受他人写入
+（唯一鉴权是一个 Bearer token）。要用，请按下面「自建部署」自己搭一套（Cloudflare 免费额度基本够用）。
+
+各端详细说明见对应目录 README。
+
+## 自建部署
+
+完整教程（注册账号、开通 Workers AI / R2、建 D1 与 R2、生成 token、部署、三端指向自建实例、常见坑）：
+
+👉 [`docs/SELF-HOSTING.md`](docs/SELF-HOSTING.md)
+
+教程里所有域名 / 邮箱都是占位符，替换成你自己的即可。
 
 ## 架构
 
