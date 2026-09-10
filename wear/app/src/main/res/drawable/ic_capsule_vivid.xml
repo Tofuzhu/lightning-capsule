@@ -1,0 +1,23 @@
+<!--
+  Vivid variant of ic_capsule for the SMALL_IMAGE complication branch.
+
+  Some watch faces render SMALL_IMAGE (ICON sub-type) untinted, which left the
+  plain white glyph invisible on light dials. This copy drops the
+  `android:tint="?android:attr/colorControlNormal"` and bakes in a vivid neon
+  yellow-green fill (#BBFC02) that matches the user's system accent_color, so the
+  icon stays legible even when the watch face does not tint it.
+
+  Identical path data / fillType to ic_capsule.xml — only the color handling
+  differs. MONOCHROMATIC_IMAGE still uses ic_capsule.xml so tintable faces keep
+  their expected behaviour.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <path
+        android:fillColor="#FFBBFC02"
+        android:fillType="evenOdd"
+        android:pathData="M7,5 L17,5 A7,7 0 0 1 17,19 L7,19 A7,7 0 0 1 7,5 Z M14.5,6 L8,13.2 L11.3,13.2 L9.5,18 L16,10.8 L12.7,10.8 Z" />
+</vector>
