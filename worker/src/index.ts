@@ -171,6 +171,25 @@ async function transcribeWithTimeout(env: Env, audio: ArrayBuffer): Promise<stri
   }
 }
 
+/**
+ * Shared transcription step used by capture, the manual retry endpoint and the cron
+ * `scheduled` handler: re-read the audio from R2 (the source of truth), run Whisper under
+ * the 60s ceiling, and derive the content checksum. Throws on a missing R2 object or a
+ * Whisper timeout/failure — each caller decides how to record that (capture -> insert a
+ * pending_retry row + 504; retry -> keep pending_retry + 502; scheduled -> keep
+ * pending_retry + console.error).
+ */
+async function transcribeFromR2(
+  env: Env,
+  audioKey: string,
+): Promise<{ transcript: string; checksum: string }> {
+  const obj = await env.AUDIO_BUCKET.get(audioKey);
+  if (!obj) throw new Error("r2 object missing");
+  const transcript = await transcribeWithTimeout(env, await obj.arrayBuffer());
+  const checksum = await sha256Hex(transcript);
+  return { transcript, checksum };
+}
+
 /** Columns returned to the pull-sync client. Internal fields (audio_url, checksum,
  *  raw_transcript, version) are intentionally omitted. */
 const EXPORT_COLUMNS = "id, export_id, content, source, tags, status, created_at, updated_at, synced_at";
@@ -217,10 +236,9 @@ async function handleCapture(request: Request, env: Env): Promise<Response> {
 
     // (2) transcribe with 60s protection; re-read the bytes from R2 (source of truth)
     let transcript: string;
+    let checksum: string;
     try {
-      const obj = await env.AUDIO_BUCKET.get(key);
-      if (!obj) throw new Error("r2 object missing after put");
-      transcript = await transcribeWithTimeout(env, await obj.arrayBuffer());
+      ({ transcript, checksum } = await transcribeFromR2(env, key));
     } catch (err) {
       // (4) timeout / failure -> pending_retry, 504, audio still safe in R2
       console.error("whisper failed, marking pending_retry", err);
@@ -242,7 +260,6 @@ async function handleCapture(request: Request, env: Env): Promise<Response> {
     }
 
     // (3) success -> pending
-    const checksum = await sha256Hex(transcript);
     try {
       await env.DB.prepare(
         `INSERT INTO capsules (id, content, raw_transcript, audio_url, source, tags, status, checksum, export_id)
@@ -503,6 +520,84 @@ async function handleCapsuleAudio(id: string, env: Env): Promise<Response> {
   });
 }
 
+/**
+ * POST /api/capsules/:id/retry — re-run transcription for a capsule whose audio is safe
+ * in R2 but whose Whisper pass previously timed out/failed (status='pending_retry').
+ *   unknown id                              -> 404
+ *   status != 'pending_retry' or no audio   -> 400 {"error":"no audio to retry"}
+ *   transcription fails again               -> 502 {"error":"transcription failed"}, row untouched
+ *   success -> 200 with the updated row (CAPSULE_LIST_COLUMNS); status flips to 'pending',
+ *              content/raw_transcript/checksum/updated_at refreshed.
+ */
+async function handleCapsuleRetry(id: string, env: Env): Promise<Response> {
+  const row = await env.DB.prepare(
+    `SELECT id, status, audio_url FROM capsules WHERE id = ? LIMIT 1`,
+  )
+    .bind(id)
+    .first<{ id: string; status: string; audio_url: string | null }>();
+  if (!row) return errorResponse("not found", 404);
+  if (row.status !== "pending_retry" || !row.audio_url) {
+    return errorResponse("no audio to retry", 400);
+  }
+
+  let transcript: string;
+  let checksum: string;
+  try {
+    ({ transcript, checksum } = await transcribeFromR2(env, row.audio_url));
+  } catch (err) {
+    // keep pending_retry so cron / a later manual retry can try again
+    console.error(`manual retry transcription failed for capsule ${id}`, err);
+    return errorResponse("transcription failed", 502);
+  }
+
+  try {
+    await env.DB.prepare(
+      `UPDATE capsules SET content = ?, raw_transcript = ?, checksum = ?, status = 'pending',
+       updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
+    )
+      .bind(transcript, transcript, checksum, id)
+      .run();
+  } catch (dbErr) {
+    console.error("D1 update (retry) failed", dbErr);
+    return errorResponse("update failed", 500);
+  }
+
+  const updated = await env.DB.prepare(`SELECT ${CAPSULE_LIST_COLUMNS} FROM capsules WHERE id = ?`)
+    .bind(id)
+    .first();
+  return json(updated, 200);
+}
+
+/**
+ * Cron (`triggers.crons` in wrangler.jsonc) — scan up to 10 oldest pending_retry capsules
+ * that still have audio in R2 and re-transcribe each. No auth: a cron invocation carries no
+ * request/headers. On success the row flips to 'pending' (same shape as a fresh capture);
+ * on failure the row is left as pending_retry and the error is logged for `wrangler tail`.
+ * The `AND status = 'pending_retry'` guard on the UPDATE means a manual retry that landed
+ * first is never clobbered.
+ */
+async function runScheduledRetries(env: Env): Promise<void> {
+  const { results } = await env.DB.prepare(
+    `SELECT id, audio_url FROM capsules
+     WHERE status = 'pending_retry' AND audio_url IS NOT NULL
+     ORDER BY created_at ASC LIMIT 10`,
+  ).all<{ id: string; audio_url: string }>();
+
+  for (const row of results ?? []) {
+    try {
+      const { transcript, checksum } = await transcribeFromR2(env, row.audio_url);
+      await env.DB.prepare(
+        `UPDATE capsules SET content = ?, raw_transcript = ?, checksum = ?, status = 'pending',
+         updated_at = CURRENT_TIMESTAMP WHERE id = ? AND status = 'pending_retry'`,
+      )
+        .bind(transcript, transcript, checksum, row.id)
+        .run();
+    } catch (err) {
+      console.error(`scheduled retry failed for capsule ${row.id}`, err);
+    }
+  }
+}
+
 /* ------------------------------- router --------------------------------- */
 
 export default {
@@ -529,10 +624,16 @@ export default {
         if (path.startsWith("/api/capsules/")) {
           const rest = path.slice("/api/capsules/".length);
           const audioSuffix = "/audio";
+          const retrySuffix = "/retry";
           if (request.method === "GET" && rest.endsWith(audioSuffix)) {
             const audioId = safeDecode(rest.slice(0, -audioSuffix.length));
             if (!audioId) return errorResponse("bad request", 400);
             return await handleCapsuleAudio(audioId, env);
+          }
+          if (request.method === "POST" && rest.endsWith(retrySuffix)) {
+            const retryId = safeDecode(rest.slice(0, -retrySuffix.length));
+            if (!retryId) return errorResponse("bad request", 400);
+            return await handleCapsuleRetry(retryId, env);
           }
           if (request.method === "DELETE" && !rest.includes("/")) {
             const delId = safeDecode(rest);
@@ -554,6 +655,16 @@ export default {
       // last-resort guard: never leak internals, never crash the isolate
       console.error("unhandled error", err);
       return errorResponse("internal error", 500);
+    }
+  },
+
+  // Cron entrypoint — see runScheduledRetries. Wrapped so a thrown error can never
+  // escape the isolate; individual per-capsule failures are already caught inside.
+  async scheduled(_controller: ScheduledController, env: Env, _ctx: ExecutionContext): Promise<void> {
+    try {
+      await runScheduledRetries(env);
+    } catch (err) {
+      console.error("scheduled handler failed", err);
     }
   },
 } satisfies ExportedHandler<Env>;
