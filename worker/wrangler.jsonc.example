@@ -27,6 +27,9 @@
   // 必须保持空对象：vars 里放 AUTH_TOKEN 占位会覆盖 secret 导致线上 401。
   "vars": {},
 
+  // 每 10 分钟扫一次 pending_retry 胶囊，自动重跑转写（src/index.ts 的 scheduled 回调）。
+  "triggers": { "crons": ["*/10 * * * *"] },
+
   // Phase 2 — PWA 录音前端。静态文件由 Assets 直接提供（index.html / manifest /
   // icons / sw.js），/api/* 仍由 src/index.ts 的 Worker 处理：静态请求命中资源即返回、
   // 不进 Worker；未命中的路径（/api/*）才调用 Worker。无需额外路由代码。

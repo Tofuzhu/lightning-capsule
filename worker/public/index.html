@@ -850,6 +850,14 @@
     edit.textContent = "编辑";
     edit.addEventListener("click", function (e) { e.stopPropagation(); startEditCapsule(detail, it); });
     actions.appendChild(edit);
+    if (it.status === "pending_retry") {
+      var retry = document.createElement("button");
+      retry.type = "button";
+      retry.className = "btn btn-ghost";
+      retry.textContent = "重试";
+      retry.addEventListener("click", function (e) { e.stopPropagation(); retryCapsule(detail, it); });
+      actions.appendChild(retry);
+    }
     var del = document.createElement("button");
     del.type = "button";
     del.className = "btn btn-danger";
@@ -926,6 +934,37 @@
         save.textContent = "保存";
       }
     });
+  }
+
+  /* 手动重试转写：仅 pending_retry 条目可见。POST /api/capsules/:id/retry，
+     成功后用返回行替换 logItems 里的这条并 renderLog（按钮随 status 变化消失）。 */
+  async function retryCapsule(detail, it) {
+    var actions = detail.querySelector(".cap-actions");
+    var btns = actions ? actions.querySelectorAll("button") : [];
+    for (var b = 0; b < btns.length; b++) btns[b].disabled = true;
+    try {
+      var resp = await fetch(API_BASE + "/api/capsules/" + encodeURIComponent(it.id) + "/retry", {
+        method: "POST",
+        headers: { "Authorization": authHeader() }
+      });
+      var data = {};
+      try { data = await resp.json(); } catch (e) { /* non-JSON */ }
+      if (resp.status === 404) { toast("这条胶囊已不存在"); removeLogItem(it.id); return; }
+      if (!resp.ok) throw new Error("retry " + resp.status);
+      var updated = (data && data.id) ? data : null;
+      for (var i = 0; i < logItems.length; i++) {
+        if (logItems[i].id === it.id) {
+          logItems[i] = updated || Object.assign({}, logItems[i], { status: "pending" });
+          break;
+        }
+      }
+      logError.hidden = true;
+      renderLog();
+      toast("重试成功");
+    } catch (e) {
+      for (var b2 = 0; b2 < btns.length; b2++) btns[b2].disabled = false;
+      toast("重试失败，请稍后再试");
+    }
   }
 
   async function loadAudio(id, audioEl) {
