@@ -163,6 +163,7 @@
   .hst.pending { background: rgba(52, 211, 153, 0.15); color: var(--ok); }
   .hst.pending_retry { background: rgba(251, 191, 36, 0.15); color: var(--warn); }
   .hst.synced { background: rgba(147, 160, 184, 0.18); color: var(--muted); }
+  .hst.noise { background: rgba(251, 191, 36, 0.15); color: var(--warn); }
 
   footer { text-align: center; font-size: 11px; color: var(--muted); padding: 6px 0 2px; word-break: break-all; }
 
@@ -207,6 +208,15 @@
   .cap-src {
     font-size: 11px; font-weight: 700; padding: 2px 7px; border-radius: 999px;
     background: rgba(147, 160, 184, 0.18); color: var(--muted);
+  }
+  .cap-noise-tag {
+    font-size: 11px; font-weight: 700; padding: 2px 7px; border-radius: 999px;
+    background: rgba(251, 191, 36, 0.15); color: var(--warn);
+  }
+  .cap-noise-hint {
+    font-size: 12px; color: var(--warn); line-height: 1.45;
+    background: rgba(251, 191, 36, 0.1); border: 1px solid rgba(251, 191, 36, 0.28);
+    border-radius: 10px; padding: 8px 10px; margin-bottom: 10px;
   }
   .cap-detail { display: none; margin-top: 10px; }
   .cap-card.open .cap-detail { display: block; }
@@ -796,6 +806,12 @@
     var time = document.createElement("span");
     time.textContent = shortTime(it.created_at);
     meta.appendChild(src);
+    if (it.status === "noise") {
+      var noiseTag = document.createElement("span");
+      noiseTag.className = "cap-noise-tag";
+      noiseTag.textContent = "疑似噪音";
+      meta.appendChild(noiseTag);
+    }
     meta.appendChild(time);
     card.appendChild(meta);
 
@@ -816,6 +832,13 @@
 
   function fillDetail(detail, it) {
     detail.innerHTML = "";
+
+    if (it.status === "noise") {
+      var hint = document.createElement("div");
+      hint.className = "cap-noise-hint";
+      hint.textContent = "⚠️ 疑似噪音：内容可能是静音 / 极短录音被 Whisper 误识别的字幕残留，可直接删除。";
+      detail.appendChild(hint);
+    }
 
     var full = document.createElement("div");
     full.className = "cap-full";

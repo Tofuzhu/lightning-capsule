@@ -17,7 +17,9 @@
  *   1. Stream the uploaded Blob straight into R2 (never buffered fully before persistence).
  *   2. Only after R2 confirms the write do we call Whisper, guarded by AbortSignal.timeout(60000)
  *      AND a Promise.race backstop timer.
- *   3. Success -> row with status='pending'.
+ *   3. Success -> row with status='pending' (or status='noise' when a <8KB clip transcribes to
+ *      Whisper "YouTube subtitle" hallucination boilerplate — kept, not deleted; see
+ *      isLikelyHallucination). noise rows are visible in GET /api/capsules but excluded from export.
  *   4. Whisper timeout / failure -> row with status='pending_retry' (audio_url points at the
  *      already-safe R2 object) and HTTP 504. The Worker never throws past this point, so the
  *      audio is never lost and the capture can be retried later.
@@ -190,6 +192,45 @@ async function transcribeFromR2(
   return { transcript, checksum };
 }
 
+/**
+ * Whisper hallucination guard (防幻觉).
+ *
+ * On silence / sub-second ambient noise Whisper emits "YouTube subtitle" boilerplate it
+ * memorised in training ("请不吝点赞 订阅 订阅 转发 打赏支持..."). The watch's 700ms floor
+ * lets ~1.4s of room noise through. We can't cheaply decode the audio server-side to measure
+ * duration, so we approximate: a very small R2 object (< 8KB) whose transcript matches one of
+ * these conservative patterns is almost certainly a hallucination. Such rows are stored with
+ * status='noise' (audio + transcript kept — the user decides whether to delete). Normal-sized
+ * audio is never touched, and the text-upload path never runs this check.
+ */
+const HALLUCINATION_MIN_AUDIO_BYTES = 8 * 1024;
+const HALLUCINATION_PATTERNS: RegExp[] = [
+  /请不吝点赞/,
+  /不吝点赞/,
+  /点赞.{0,6}订阅/,
+  /订阅.{0,4}(订阅|转发)/,
+  /转发.{0,6}(打赏|评论)/,
+  /打赏支持/,
+  /一键三连/,
+  /投币/,
+  /感谢观看/,
+  /明镜与点点/,
+  /下期再见/,
+  /关注我的频道/,
+  /^订阅\s+订阅/,
+  /^(点赞|关注|订阅)[，,、\s]*$/,
+];
+
+/** True when `text` looks like Whisper hallucination boilerplate for a tiny (<8KB) audio clip.
+ *  Empty transcripts also count as suspicious. Larger audio is always treated as genuine. */
+function isLikelyHallucination(text: string, audioSizeBytes: number): boolean {
+  if (!text) return true; // 空转录 = 可疑
+  if (audioSizeBytes < HALLUCINATION_MIN_AUDIO_BYTES) {
+    return HALLUCINATION_PATTERNS.some((re) => re.test(text));
+  }
+  return false; // 正常大小音频不误伤
+}
+
 /** Columns returned to the pull-sync client. Internal fields (audio_url, checksum,
  *  raw_transcript, version) are intentionally omitted. */
 const EXPORT_COLUMNS = "id, export_id, content, source, tags, status, created_at, updated_at, synced_at";
@@ -259,13 +300,15 @@ async function handleCapture(request: Request, env: Env): Promise<Response> {
       );
     }
 
-    // (3) success -> pending
+    // (3) success -> pending, unless the transcript looks like Whisper hallucination on a
+    //     tiny clip -> status='noise' (kept, not deleted; user decides). See isLikelyHallucination.
+    const captureStatus = isLikelyHallucination(transcript, audio.size) ? "noise" : "pending";
     try {
       await env.DB.prepare(
         `INSERT INTO capsules (id, content, raw_transcript, audio_url, source, tags, status, checksum, export_id)
-         VALUES (?, ?, ?, ?, ?, ?, 'pending', ?, ?)`,
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
-        .bind(id, transcript, transcript, key, source, tags, checksum, exportId)
+        .bind(id, transcript, transcript, key, source, tags, captureStatus, checksum, exportId)
         .run();
     } catch (dbErr) {
       console.error("D1 insert (audio pending) failed", dbErr);
@@ -274,7 +317,7 @@ async function handleCapture(request: Request, env: Env): Promise<Response> {
     return json(
       {
         id,
-        status: "pending",
+        status: captureStatus,
         checksum,
         audio_url: key,
         content: transcript,

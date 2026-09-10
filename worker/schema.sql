@@ -6,6 +6,12 @@ CREATE TABLE IF NOT EXISTS capsules (
   audio_url TEXT,
   source TEXT DEFAULT 'web',
   tags TEXT,
+  -- status lifecycle (TEXT, no CHECK constraint):
+  --   pending        transcribed / captured, awaiting pull-sync export
+  --   pending_retry  audio in R2 but Whisper timed out/failed; cron + manual retry re-run it
+  --   synced         acked by the pull-sync client (POST /api/ack)
+  --   noise          <8KB audio clip that transcribed to Whisper hallucination boilerplate;
+  --                  transcript + audio kept, shown in the reading UI, NOT exported, NOT auto-deleted
   status TEXT DEFAULT 'pending',
   version INTEGER DEFAULT 1,
   checksum TEXT,
