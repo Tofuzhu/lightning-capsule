@@ -55,4 +55,9 @@ dependencies {
     implementation(libs.okhttp)
 
     debugImplementation(libs.androidx.compose.ui.tooling)
+
+    // Queue index is plain JSON; use the real org.json impl on the unit-test
+    // classpath so it isn't the empty android.jar stub.
+    testImplementation(libs.junit)
+    testImplementation(libs.org.json)
 }

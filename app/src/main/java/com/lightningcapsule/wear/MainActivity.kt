@@ -13,8 +13,13 @@ import androidx.compose.runtime.setValue
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import androidx.wear.compose.material3.MaterialTheme
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.withContext
+import java.io.File
 
 /** UI state machine for the single capture screen. */
 sealed interface UiState {
@@ -24,6 +29,8 @@ sealed interface UiState {
     data object Recording : UiState
     data object Uploading : UiState
     data object Success : UiState
+    /** Upload failed but the capsule was stashed in the offline queue. */
+    data object Queued : UiState
     data class Error(val message: String) : UiState
 }
 
@@ -31,10 +38,17 @@ class MainActivity : ComponentActivity() {
 
     private lateinit var tokenStore: TokenStore
     private lateinit var recorder: AudioRecorder
+    private lateinit var queue: CaptureQueue
+    private lateinit var networkMonitor: NetworkMonitor
     private val uploader = CapsuleUploader()
+
+    /** Guards the drain loop so only one runs at a time. */
+    private val drainMutex = Mutex()
 
     private var uiState by mutableStateOf<UiState>(UiState.Idle)
     private var hasMicPermission by mutableStateOf(false)
+    private var pendingCount by mutableStateOf(0)
+    private var draining by mutableStateOf(false)
     private var uploadJob: Job? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -43,6 +57,9 @@ class MainActivity : ComponentActivity() {
         tokenStore = TokenStore(this)
         recorder = AudioRecorder(this)
         recorder.onMaxDurationReached = { finishRecordingAndUpload() }
+        queue = CaptureQueue(File(filesDir, "capsule_queue"))
+        pendingCount = queue.count()
+        networkMonitor = NetworkMonitor(this) { runOnUiThread { maybeDrainQueue() } }
 
         // Dev convenience: `adb shell am start -n .../.MainActivity -e auth_token <TOKEN>`
         // lets the user seed the token without typing on the watch. Not logged.
@@ -67,23 +84,37 @@ class MainActivity : ComponentActivity() {
                 CaptureScreen(
                     state = uiState,
                     hasMicPermission = hasMicPermission,
+                    pendingCount = pendingCount,
+                    draining = draining,
                     onRequestPermission = {
                         permissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
                     },
                     onSaveToken = { value ->
                         tokenStore.token = value
-                        if (tokenStore.hasToken) uiState = UiState.Idle
+                        if (tokenStore.hasToken) {
+                            uiState = UiState.Idle
+                            maybeDrainQueue()
+                        }
                     },
                     onPressStart = ::startRecording,
                     onPressEnd = ::finishRecordingAndUpload,
                     onReset = { if (uiState !is UiState.Recording) uiState = UiState.Idle },
+                    onRetryNow = ::maybeDrainQueue,
                 )
             }
         }
     }
 
+    override fun onStart() {
+        super.onStart()
+        networkMonitor.start()
+        // Catch up on anything stashed while the app was away.
+        maybeDrainQueue()
+    }
+
     override fun onStop() {
         super.onStop()
+        networkMonitor.stop()
         // Do not keep the mic open in the background.
         if (uiState is UiState.Recording) {
             recorder.cancel()
@@ -125,12 +156,77 @@ class MainActivity : ComponentActivity() {
         uiState = UiState.Uploading
         uploadJob?.cancel()
         uploadJob = lifecycleScope.launch {
-            val outcome = uploader.upload(result.file, token)
-            runCatching { result.file.delete() }
-            uiState = when (outcome) {
-                is CapsuleUploader.Outcome.Success -> UiState.Success
-                is CapsuleUploader.Outcome.Failure ->
-                    UiState.Error(getString(R.string.upload_failed))
+            when (uploader.upload(result.file, token)) {
+                is CapsuleUploader.Outcome.Success -> {
+                    runCatching { result.file.delete() }
+                    uiState = UiState.Success
+                }
+
+                is CapsuleUploader.Outcome.AuthError -> {
+                    // Do not queue: retrying an invalid token just loops forever.
+                    runCatching { result.file.delete() }
+                    uiState = UiState.Error(getString(R.string.token_invalid))
+                }
+
+                is CapsuleUploader.Outcome.Failure -> {
+                    val enq = withContext(Dispatchers.IO) { queue.enqueue(result.file) }
+                    runCatching { result.file.delete() }
+                    pendingCount = queue.count()
+                    uiState = when (enq) {
+                        is EnqueueResult.Enqueued -> UiState.Queued
+                        is EnqueueResult.QueueFull -> UiState.Error(getString(R.string.queue_full))
+                    }
+                }
+            }
+
+            // Keep working through the backlog after a success or a fresh stash.
+            if (uiState is UiState.Success || uiState is UiState.Queued) {
+                maybeDrainQueue()
+            }
+        }
+    }
+
+    /**
+     * Uploads queued capsules FIFO in the background until the queue is empty or
+     * one fails. Never runs concurrently with itself. No-op without a token or an
+     * empty queue.
+     */
+    private fun maybeDrainQueue() {
+        val token = tokenStore.token ?: return
+        if (queue.isEmpty) {
+            pendingCount = 0
+            return
+        }
+
+        lifecycleScope.launch {
+            if (!drainMutex.tryLock()) return@launch
+            draining = true
+            try {
+                withContext(Dispatchers.IO) {
+                    while (isActive) {
+                        val entry = queue.peek() ?: break
+                        when (uploader.upload(queue.fileFor(entry), token)) {
+                            is CapsuleUploader.Outcome.Success -> queue.remove(entry)
+
+                            is CapsuleUploader.Outcome.AuthError -> {
+                                withContext(Dispatchers.Main) {
+                                    uiState = UiState.Error(getString(R.string.token_invalid))
+                                }
+                                break
+                            }
+
+                            is CapsuleUploader.Outcome.Failure -> {
+                                queue.incrementAttempts(entry)
+                                break
+                            }
+                        }
+                        withContext(Dispatchers.Main) { pendingCount = queue.count() }
+                    }
+                }
+            } finally {
+                pendingCount = queue.count()
+                draining = false
+                drainMutex.unlock()
             }
         }
     }

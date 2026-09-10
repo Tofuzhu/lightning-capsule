@@ -9,6 +9,14 @@
     <string name="recorded">✓ 已记录</string>
     <string name="upload_failed">上传失败，请重试</string>
     <string name="tap_to_retry">点按重试</string>
+
+    <string name="token_invalid">token 无效</string>
+    <string name="queued_offline">已暂存，待网络恢复后上传</string>
+    <string name="queued_short">已暂存</string>
+    <string name="queue_full">离线队列已满</string>
+    <string name="pending_count">待上传 %1$d 条</string>
+    <string name="draining_count">正在补传 %1$d 条…</string>
+    <string name="retry_now">立即重试</string>
     <string name="need_mic_permission">需要麦克风权限</string>
     <string name="grant_permission">授予权限</string>
     <string name="recording_too_short">录音太短</string>

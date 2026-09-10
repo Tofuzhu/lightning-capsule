@@ -33,9 +33,54 @@
 ### 技术栈
 
 Kotlin · Jetpack Compose for Wear OS（`androidx.wear.compose:compose-material3`）· OkHttp ·
-单 Activity，无后台服务，无离线队列（v1 在线即可）。
+单 Activity，无后台服务。
 
-> 不使用 Wear Tiles（Wear OS 7 已 sunset）。v1 从 App 列表启动。
+> 不使用 Wear Tiles（Wear OS 7 已 sunset）。从 App 列表启动。
+
+---
+
+## 功能（v2）离线队列
+
+针对 **Pixel Watch 4 Wi-Fi 版**：手机不在身边且无 Wi-Fi 时上传会失败。v2 让失败的录音
+**本地暂存**，网络恢复（蓝牙桥接或 Wi-Fi 任一）后**自动补传**，不丢录音。
+
+### 行为
+
+| 场景 | v1 | v2 |
+| --- | --- | --- |
+| 上传成功 | ✓ 已记录 | 不变，且随后继续补传队列 |
+| 网络错误 / 非 2xx（401/403 除外） | “上传失败，请重试” | 存入离线队列 → “已暂存，待网络恢复后上传” |
+| 401/403（token 无效） | “上传失败，请重试” | **不入队**（避免死循环）→ “token 无效” |
+| 队列已满（50 条或 30MB） | — | 新录音直接丢弃 → “离线队列已满” |
+
+### 补传时机
+
+- App 启动 / 从后台恢复（`onStart`）→ 有队列则后台补传
+- 网络恢复 → `ConnectivityManager.registerDefaultNetworkCallback` 监听，`onAvailable` 触发补传
+  （需 `ACCESS_NETWORK_STATE`，已加到 manifest；回调在 `onStart` 注册、`onStop` 注销）
+- 补传在 `lifecycleScope` + `Dispatchers.IO` 协程里 FIFO 逐个进行，不阻塞 UI；
+  同一时刻只跑一个补传循环（`Mutex.tryLock`），遇失败即停，遇 401/403 停止并提示 token 无效
+
+### 存储
+
+- 录音文件：`filesDir/capsule_queue/`（内部存储，无需权限）
+- 索引：单个 `capsule_queue/index.json` —— 数组，每项 `{file, createdAtMs, attempts}`（无 Room/SQLite）
+- 上传成功 → 删文件 + 移除索引项；失败 → 保留并 `attempts+1`
+- 容错：`index.json` 解析失败 → 视为空队列（坏文件重命名为 `index.json.corrupt`）；
+  索引项指向的文件缺失 / 为空 → 跳过并从索引剔除，不崩溃
+- 线程安全：`CaptureQueue` 所有公有方法 `synchronized`，读取走内存副本，写入落盘后返回
+
+### UI
+
+- 主界面底部状态行：`待上传 N 条`（N>0 时显示），补传中显示 `正在补传 N 条…`
+- 非补传状态下状态行带一个 `立即重试` 小按钮，点按触发补传
+- 上传转离线时提示 `已暂存，待网络恢复后上传`（1.8s 后自动回初始态，press-to-talk 交互不变）
+
+### 测试
+
+`app/src/test/.../CaptureQueueTest.kt`：入队 / 出队（FIFO）/ 计数与字节上限 / 损坏索引容错 /
+索引与文件不一致容错 / `attempts` 持久化。纯本地逻辑，不依赖网络或 Android 框架
+（`./gradlew testDebugUnitTest`）。
 
 ---
 
@@ -141,7 +186,7 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
   代码按标准 Android/Wear 实践编写：`MediaRecorder(context)` 构造、`MPEG_4 + AAC`、
   `setMaxDuration`、`OnInfoListener` 处理超时。若真机录音失败，App 会显示 “无法录音”。
 - 极短按压（<0.7s）判定为 “录音太短”，不上传。
-- 无离线队列：无网络时上传直接失败，需手动重试。
+- 离线队列（v2）在真机上的网络回调时机、蓝牙桥接恢复行为未实测；核心队列逻辑有单元测试覆盖。
 - 文本输入依赖 Wear OS 系统输入法；若不便打字，用上面的 adb 注入方式设置 token。
 - `compileSdk`/`targetSdk` = 37（Android 17）。若目标 SDK 平台在构建机不可用，
   可在 `app/build.gradle.kts` 回退到 36（对侧载功能无影响）。
@@ -162,12 +207,17 @@ lightning-capsule-wear/
     └── src/main/
         ├── AndroidManifest.xml
         ├── java/com/lightningcapsule/wear/
-        │   ├── MainActivity.kt        # 单 Activity + UI 状态机
-        │   ├── CaptureScreen.kt       # Compose UI（press-to-talk / token / 权限）
+        │   ├── MainActivity.kt        # 单 Activity + UI 状态机 + 补传编排
+        │   ├── CaptureScreen.kt       # Compose UI（press-to-talk / token / 权限 / 队列状态行）
         │   ├── AudioRecorder.kt       # MediaRecorder 封装
-        │   ├── CapsuleUploader.kt     # OkHttp multipart 上传
+        │   ├── CapsuleUploader.kt     # OkHttp multipart 上传（Success / AuthError / Failure）
+        │   ├── CaptureQueue.kt        # 离线队列：文件 + index.json，线程安全，无 Android 依赖
+        │   ├── NetworkMonitor.kt      # ConnectivityManager 默认网络回调
         │   └── TokenStore.kt          # SharedPreferences token 存取
         └── res/…                      # 字符串、启动图标
+
+app/src/test/java/com/lightningcapsule/wear/
+└── CaptureQueueTest.kt               # 队列核心逻辑单元测试（JUnit，纯本地）
 ```
 
 ## Git

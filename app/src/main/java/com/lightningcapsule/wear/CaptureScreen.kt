@@ -61,11 +61,14 @@ private val Muted = Color(0xFFB0B0B0)
 fun CaptureScreen(
     state: UiState,
     hasMicPermission: Boolean,
+    pendingCount: Int,
+    draining: Boolean,
     onRequestPermission: () -> Unit,
     onSaveToken: (String) -> Unit,
     onPressStart: () -> Unit,
     onPressEnd: () -> Unit,
     onReset: () -> Unit,
+    onRetryNow: () -> Unit,
 ) {
     Box(
         modifier = Modifier
@@ -77,7 +80,15 @@ fun CaptureScreen(
         when {
             state is UiState.NeedToken -> TokenEntry(onSaveToken)
             !hasMicPermission -> PermissionPrompt(onRequestPermission)
-            else -> CaptureContent(state, onPressStart, onPressEnd, onReset)
+            else -> CaptureContent(
+                state = state,
+                pendingCount = pendingCount,
+                draining = draining,
+                onPressStart = onPressStart,
+                onPressEnd = onPressEnd,
+                onReset = onReset,
+                onRetryNow = onRetryNow,
+            )
         }
     }
 }
@@ -85,13 +96,16 @@ fun CaptureScreen(
 @Composable
 private fun CaptureContent(
     state: UiState,
+    pendingCount: Int,
+    draining: Boolean,
     onPressStart: () -> Unit,
     onPressEnd: () -> Unit,
     onReset: () -> Unit,
+    onRetryNow: () -> Unit,
 ) {
-    // Auto-return to Idle a moment after a successful upload.
+    // Auto-return to Idle a moment after a success or an offline stash.
     LaunchedEffect(state) {
-        if (state is UiState.Success) {
+        if (state is UiState.Success || state is UiState.Queued) {
             delay(1800)
             onReset()
         }
@@ -128,6 +142,12 @@ private fun CaptureContent(
                     fontSize = 40.sp,
                 )
 
+                is UiState.Queued -> Text(
+                    text = stringResource(R.string.queued_short),
+                    color = OnDark,
+                    fontSize = 15.sp,
+                )
+
                 else -> Text(
                     text = stringResource(R.string.hold_to_talk),
                     color = OnDark,
@@ -142,13 +162,15 @@ private fun CaptureContent(
             is UiState.Recording -> stringResource(R.string.recording)
             is UiState.Uploading -> stringResource(R.string.uploading)
             is UiState.Success -> stringResource(R.string.recorded)
+            is UiState.Queued -> stringResource(R.string.queued_offline)
             is UiState.Error -> state.message
             else -> null
         }
+        val isNotice = state is UiState.Error || state is UiState.Queued
         if (status != null) {
             Text(
                 text = status,
-                color = if (state is UiState.Error) Accent else Muted,
+                color = if (isNotice) Accent else Muted,
                 fontSize = 14.sp,
                 textAlign = TextAlign.Center,
             )
@@ -160,6 +182,35 @@ private fun CaptureContent(
                 fontSize = 12.sp,
                 textAlign = TextAlign.Center,
             )
+        }
+
+        if (pendingCount > 0) {
+            Spacer(Modifier.height(8.dp))
+            Text(
+                text = if (draining) {
+                    stringResource(R.string.draining_count, pendingCount)
+                } else {
+                    stringResource(R.string.pending_count, pendingCount)
+                },
+                color = Muted,
+                fontSize = 12.sp,
+                textAlign = TextAlign.Center,
+            )
+            if (!draining) {
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    text = stringResource(R.string.retry_now),
+                    color = Accent,
+                    fontSize = 12.sp,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(12.dp))
+                        .pointerInput(Unit) {
+                            detectTapGestures(onTap = { onRetryNow() })
+                        }
+                        .padding(horizontal = 14.dp, vertical = 4.dp),
+                )
+            }
         }
     }
 }

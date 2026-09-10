@@ -32,7 +32,11 @@ class CapsuleUploader {
     sealed interface Outcome {
         /** HTTP 201 (new) or 200 (duplicate). */
         data object Success : Outcome
-        /** Any other HTTP status or a network/timeout failure. */
+
+        /** HTTP 401/403 — the token is invalid. Never retry / never queue this. */
+        data object AuthError : Outcome
+
+        /** Any other HTTP status or a network/timeout failure — safe to queue and retry. */
         data class Failure(val reason: String) : Outcome
     }
 
@@ -57,7 +61,7 @@ class CapsuleUploader {
             client.newCall(request).execute().use { response ->
                 when (response.code) {
                     200, 201 -> Outcome.Success
-                    401, 403 -> Outcome.Failure("token 无效")
+                    401, 403 -> Outcome.AuthError
                     else -> Outcome.Failure("HTTP ${response.code}")
                 }
             }
