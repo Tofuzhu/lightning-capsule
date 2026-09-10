@@ -64,6 +64,22 @@ const WHISPER_TASK = "transcribe";
 // Workers 按 CPU time 计费，等待 AI 推理不消耗 CPU → 放宽到 60s 不会增加成本。
 const WHISPER_TIMEOUT_MS = 60_000;
 
+// LLM 后处理：把 Whisper 原文做「最小必要修正」（同音字 / 半角逗号 / 孤立字符 / 口语填充词）。
+// qwen3-30b-a3b-fp8 实测忠实原文、不胡乱改写，免费计划可用（~10 neurons/次）。
+// 不用 llama-3.2-3b（过度改写）、不用 deepseek（免费计划不可用）。
+const POLISH_MODEL = "@cf/qwen/qwen3-30b-a3b-fp8";
+const POLISH_TIMEOUT_MS = 20_000;
+const POLISH_MAX_INPUT_CHARS = 2000; // 超长跳过：省额度，且长文本规整收益低
+// 规整结果比原文长出 2.5 倍以上 = 模型跑偏（加解释 / 展开改写）→ 判定异常，降级用原文。
+const POLISH_MAX_GROWTH_RATIO = 2.5;
+// 实测有效的严格 prompt：只做校对、禁止改写 / 润色 / 增删 / 总结，纯文本输出。
+const POLISH_SYSTEM_PROMPT = `你是中文文本校对工具。用户给你一段语音识别的原始文本，请只做最小必要的修正：
+1. 修正明显的同音字/音近字错误（如"借一位客户"→"接一位客户"）
+2. 标点规范化：把半角逗号","改成全角"，"，句末用「。！？」；删除莫名其妙的孤立字母/符号（如"Ｂ"）
+3. 删除口语填充词（"嗯""啊""那个"等）
+4. 保持原意，不要改写、不要润色、不要增删内容、不要总结
+只输出修正后的文本，不要任何解释、不要引号、不要markdown。`;
+
 /* ------------------------------- helpers ---------------------------------- */
 
 function json(body: unknown, status = 200, extraHeaders?: Record<string, string>): Response {
@@ -174,23 +190,94 @@ async function transcribeWithTimeout(env: Env, audio: ArrayBuffer): Promise<stri
 }
 
 /**
- * Shared transcription step used by capture, the manual retry endpoint and the cron
- * `scheduled` handler: re-read the audio from R2 (the source of truth), run Whisper under
- * the 60s ceiling, and derive the content checksum. Throws on a missing R2 object or a
- * Whisper timeout/failure — each caller decides how to record that (capture -> insert a
- * pending_retry row + 504; retry -> keep pending_retry + 502; scheduled -> keep
+ * Low-level transcription step: re-read the audio from R2 (the source of truth) and run
+ * Whisper under the 60s ceiling. Throws on a missing R2 object or a Whisper timeout/failure.
+ * Callers go through `transcribeAndPolish`, which adds LLM post-processing, the checksum and
+ * the status decision; each caller then decides how to record a thrown failure (capture ->
+ * insert a pending_retry row + 504; retry -> keep pending_retry + 502; scheduled -> keep
  * pending_retry + console.error).
  */
 async function transcribeFromR2(
   env: Env,
   audioKey: string,
-): Promise<{ transcript: string; checksum: string; audioSizeBytes: number }> {
+): Promise<{ transcript: string; audioSizeBytes: number }> {
   const obj = await env.AUDIO_BUCKET.get(audioKey);
   if (!obj) throw new Error("r2 object missing");
   const bytes = await obj.arrayBuffer();
   const transcript = await transcribeWithTimeout(env, bytes);
-  const checksum = await sha256Hex(transcript);
-  return { transcript, checksum, audioSizeBytes: bytes.byteLength };
+  return { transcript, audioSizeBytes: bytes.byteLength };
+}
+
+/** Strip one or more layers of matching wrapping quotes ("...", '...', “...”, 「...」 …).
+ *  qwen3 sometimes returns the corrected text wrapped in quotes despite the prompt. */
+function stripWrappingQuotes(input: string): string {
+  const pairs: [string, string][] = [
+    ['"', '"'],
+    ["'", "'"],
+    ["“", "”"], // “ ”
+    ["‘", "’"], // ‘ ’
+    ["「", "」"], // 「 」
+    ["『", "』"], // 『 』
+  ];
+  let out = input.trim();
+  for (let guard = 0; guard < 4; guard++) {
+    const pair = pairs.find(
+      ([open, close]) =>
+        out.length > open.length + close.length && out.startsWith(open) && out.endsWith(close),
+    );
+    if (!pair) break;
+    out = out.slice(pair[0].length, out.length - pair[1].length).trim();
+  }
+  return out;
+}
+
+/**
+ * LLM post-processing of a raw Whisper transcript (see SPEC_polish.md). Guardrails, in order:
+ *   - empty or > POLISH_MAX_INPUT_CHARS input        -> return raw untouched (skip the call)
+ *   - env.AI.run guarded by AbortSignal.timeout AND a Promise.race backstop timer (same
+ *     belt-and-braces pattern as Whisper), 20s ceiling
+ *   - read the convenience `result.response`, trim, strip wrapping quotes
+ *   - empty output, or output longer than POLISH_MAX_GROWTH_RATIO x the input -> return raw
+ *   - ANY thrown error is logged and swallowed -> return raw
+ * It never throws and never blocks the capture: the worst case is "content == raw transcript".
+ */
+async function polishTranscript(env: Env, raw: string): Promise<string> {
+  const trimmed = raw.trim();
+  if (!trimmed || trimmed.length > POLISH_MAX_INPUT_CHARS) return raw;
+
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const backstop = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error("polish_timeout")), POLISH_TIMEOUT_MS);
+  });
+  try {
+    // env.AI.run's typed overloads don't cover this model -> explicit signature (as with Whisper).
+    const run = (
+      env.AI.run as (
+        model: string,
+        inputs: Record<string, unknown>,
+        options?: Record<string, unknown>,
+      ) => Promise<{ response?: string }>
+    )(
+      POLISH_MODEL,
+      {
+        messages: [
+          { role: "system", content: POLISH_SYSTEM_PROMPT },
+          { role: "user", content: trimmed },
+        ],
+      },
+      { signal: AbortSignal.timeout(POLISH_TIMEOUT_MS) },
+    );
+    const result = await Promise.race([run, backstop]);
+    const polished = stripWrappingQuotes((result?.response ?? "").trim());
+    if (!polished) return raw;
+    if (polished.length > trimmed.length * POLISH_MAX_GROWTH_RATIO) return raw;
+    return polished;
+  } catch (err) {
+    console.error("polishTranscript failed, falling back to raw transcript", err);
+    return raw;
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
 }
 
 /**
@@ -230,6 +317,34 @@ function isLikelyHallucination(text: string, audioSizeBytes: number): boolean {
     return HALLUCINATION_PATTERNS.some((re) => re.test(text));
   }
   return false; // 正常大小音频不误伤
+}
+
+/**
+ * Shared "transcribe -> polish -> decide status -> checksum" step for the three audio call
+ * sites (capture, manual retry, cron scheduled retry). Keeps them identical:
+ *   - `raw`    : the untouched Whisper output              -> goes to `raw_transcript`
+ *   - `polished`: the LLM post-processed text (== raw on any failure) -> goes to `content`
+ *   - `checksum`: sha256Hex(polished)
+ *   - `status` : 'noise' | 'pending' — the hallucination guard runs on the RAW transcript,
+ *                never the polished one (an LLM can rewrite the boilerplate and slip past).
+ * Throws only what `transcribeFromR2` throws (missing R2 object / Whisper timeout/failure);
+ * `polishTranscript` itself never throws.
+ */
+async function transcribeAndPolish(
+  env: Env,
+  audioKey: string,
+): Promise<{
+  raw: string;
+  polished: string;
+  checksum: string;
+  status: "noise" | "pending";
+  audioSizeBytes: number;
+}> {
+  const { transcript: raw, audioSizeBytes } = await transcribeFromR2(env, audioKey);
+  const polished = await polishTranscript(env, raw);
+  const checksum = await sha256Hex(polished);
+  const status = isLikelyHallucination(raw, audioSizeBytes) ? "noise" : "pending";
+  return { raw, polished, checksum, status, audioSizeBytes };
 }
 
 /** Columns returned to the pull-sync client. Internal fields (audio_url, checksum,
@@ -276,11 +391,14 @@ async function handleCapture(request: Request, env: Env): Promise<Response> {
       return errorResponse("audio storage failed", 502);
     }
 
-    // (2) transcribe with 60s protection; re-read the bytes from R2 (source of truth)
-    let transcript: string;
+    // (2) transcribe with 60s protection; re-read the bytes from R2 (source of truth),
+    //     then LLM-polish the transcript (falls back to raw on any failure — never blocks)
+    let raw: string;
+    let polished: string;
     let checksum: string;
+    let captureStatus: "noise" | "pending";
     try {
-      ({ transcript, checksum } = await transcribeFromR2(env, key));
+      ({ raw, polished, checksum, status: captureStatus } = await transcribeAndPolish(env, key));
     } catch (err) {
       // (4) timeout / failure -> pending_retry, 504, audio still safe in R2
       console.error("whisper failed, marking pending_retry", err);
@@ -301,15 +419,15 @@ async function handleCapture(request: Request, env: Env): Promise<Response> {
       );
     }
 
-    // (3) success -> pending, unless the transcript looks like Whisper hallucination on a
-    //     tiny clip -> status='noise' (kept, not deleted; user decides). See isLikelyHallucination.
-    const captureStatus = isLikelyHallucination(transcript, audio.size) ? "noise" : "pending";
+    // (3) success -> pending, unless the RAW transcript looks like Whisper hallucination on a
+    //     tiny clip -> status='noise' (kept, not deleted; user decides). See transcribeAndPolish.
+    //     content = polished, raw_transcript = raw (original Whisper output).
     try {
       await env.DB.prepare(
         `INSERT INTO capsules (id, content, raw_transcript, audio_url, source, tags, status, checksum, export_id)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
-        .bind(id, transcript, transcript, key, source, tags, captureStatus, checksum, exportId)
+        .bind(id, polished, raw, key, source, tags, captureStatus, checksum, exportId)
         .run();
     } catch (dbErr) {
       console.error("D1 insert (audio pending) failed", dbErr);
@@ -321,7 +439,7 @@ async function handleCapture(request: Request, env: Env): Promise<Response> {
         status: captureStatus,
         checksum,
         audio_url: key,
-        content: transcript,
+        content: polished,
         created_at: new Date().toISOString(),
       },
       201,
@@ -584,24 +702,27 @@ async function handleCapsuleRetry(id: string, env: Env): Promise<Response> {
     return errorResponse("no audio to retry", 400);
   }
 
-  let transcript: string;
+  let raw: string;
+  let polished: string;
   let checksum: string;
-  let audioSizeBytes: number;
+  let captureStatus: "noise" | "pending";
   try {
-    ({ transcript, checksum, audioSizeBytes } = await transcribeFromR2(env, row.audio_url));
+    ({ raw, polished, checksum, status: captureStatus } = await transcribeAndPolish(
+      env,
+      row.audio_url,
+    ));
   } catch (err) {
     // keep pending_retry so cron / a later manual retry can try again
     console.error(`manual retry transcription failed for capsule ${id}`, err);
     return errorResponse("transcription failed", 502);
   }
 
-  const captureStatus = isLikelyHallucination(transcript, audioSizeBytes) ? "noise" : "pending";
   try {
     await env.DB.prepare(
       `UPDATE capsules SET content = ?, raw_transcript = ?, checksum = ?, status = ?,
        updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
     )
-      .bind(transcript, transcript, checksum, captureStatus, id)
+      .bind(polished, raw, checksum, captureStatus, id)
       .run();
   } catch (dbErr) {
     console.error("D1 update (retry) failed", dbErr);
@@ -631,13 +752,12 @@ async function runScheduledRetries(env: Env): Promise<void> {
 
   for (const row of results ?? []) {
     try {
-      const { transcript, checksum, audioSizeBytes } = await transcribeFromR2(env, row.audio_url);
-      const captureStatus = isLikelyHallucination(transcript, audioSizeBytes) ? "noise" : "pending";
+      const { raw, polished, checksum, status } = await transcribeAndPolish(env, row.audio_url);
       await env.DB.prepare(
         `UPDATE capsules SET content = ?, raw_transcript = ?, checksum = ?, status = ?,
          updated_at = CURRENT_TIMESTAMP WHERE id = ? AND status = 'pending_retry'`,
       )
-        .bind(transcript, transcript, checksum, captureStatus, row.id)
+        .bind(polished, raw, checksum, status, row.id)
         .run();
     } catch (err) {
       console.error(`scheduled retry failed for capsule ${row.id}`, err);
