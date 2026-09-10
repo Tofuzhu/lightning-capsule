@@ -93,6 +93,15 @@ async function sha256Hex(input: string): Promise<string> {
   return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
+/** decodeURIComponent that never throws — returns "" on malformed percent-escapes. */
+function safeDecode(raw: string): string {
+  try {
+    return decodeURIComponent(raw).trim();
+  } catch {
+    return "";
+  }
+}
+
 /** Bearer check. Returns true only on an exact match with env.AUTH_TOKEN. */
 function isAuthorized(request: Request, env: Env): boolean {
   const header = request.headers.get("authorization") ?? "";
@@ -165,6 +174,12 @@ async function transcribeWithTimeout(env: Env, audio: ArrayBuffer): Promise<stri
 /** Columns returned to the pull-sync client. Internal fields (audio_url, checksum,
  *  raw_transcript, version) are intentionally omitted. */
 const EXPORT_COLUMNS = "id, export_id, content, source, tags, status, created_at, updated_at, synced_at";
+
+/** Columns returned to the reading UI (GET /api/capsules). `audio_url` keeps its existing
+ *  meaning — the raw R2 object key, not a fetchable URL. checksum / export_id / version /
+ *  updated_at stay internal. */
+const CAPSULE_LIST_COLUMNS =
+  "id, content, raw_transcript, audio_url, source, tags, status, created_at, synced_at";
 
 /* ------------------------------ handlers --------------------------------- */
 
@@ -355,6 +370,98 @@ async function handleAck(request: Request, env: Env): Promise<Response> {
   return json(updated, 200);
 }
 
+/**
+ * GET /api/capsules — paginated list for the reading UI.
+ *   limit  : default 30, hard cap 100, bad value -> default
+ *   offset : default 0, bad / negative value -> 0
+ *   q      : optional `content LIKE '%q%'` filter, always passed as a bound parameter
+ * Sort is `created_at DESC, id DESC` for a stable order within the same second.
+ */
+async function handleCapsulesList(request: Request, env: Env): Promise<Response> {
+  const url = new URL(request.url);
+
+  let limit = Number.parseInt(url.searchParams.get("limit") ?? "", 10);
+  if (!Number.isFinite(limit) || limit <= 0) limit = 30;
+  if (limit > 100) limit = 100;
+
+  let offset = Number.parseInt(url.searchParams.get("offset") ?? "", 10);
+  if (!Number.isFinite(offset) || offset < 0) offset = 0;
+
+  const q = (url.searchParams.get("q") ?? "").trim();
+  const filter = q ? "WHERE content LIKE ?" : "";
+  const like = `%${q}%`;
+
+  const totalStmt = env.DB.prepare(`SELECT COUNT(*) AS total FROM capsules ${filter}`);
+  const totalRow = await (q ? totalStmt.bind(like) : totalStmt).first<{ total: number }>();
+  const total = totalRow?.total ?? 0;
+
+  const listStmt = env.DB.prepare(
+    `SELECT ${CAPSULE_LIST_COLUMNS} FROM capsules ${filter} ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?`,
+  );
+  const { results } = await (q
+    ? listStmt.bind(like, limit, offset)
+    : listStmt.bind(limit, offset)
+  ).all();
+  const items = results ?? [];
+
+  return json({ items, total, has_more: offset + items.length < total });
+}
+
+/**
+ * DELETE /api/capsules/:id — remove one capsule row and its R2 audio object.
+ * A failing R2 delete must NOT block the row delete: it is logged and the response
+ * carries `audio_removed: false`.
+ */
+async function handleCapsuleDelete(id: string, env: Env): Promise<Response> {
+  const row = await env.DB.prepare(`SELECT id, audio_url FROM capsules WHERE id = ? LIMIT 1`)
+    .bind(id)
+    .first<{ id: string; audio_url: string | null }>();
+  if (!row) return errorResponse("not found", 404);
+
+  let audioRemoved = false;
+  if (row.audio_url) {
+    try {
+      await env.AUDIO_BUCKET.delete(row.audio_url);
+      audioRemoved = true;
+    } catch (err) {
+      console.error("R2 delete failed; continuing with D1 row delete", err);
+    }
+  }
+
+  try {
+    await env.DB.prepare(`DELETE FROM capsules WHERE id = ?`).bind(id).run();
+  } catch (dbErr) {
+    console.error("D1 delete failed", dbErr);
+    return errorResponse("delete failed", 500);
+  }
+
+  return json({ deleted: true, id, audio_removed: audioRemoved });
+}
+
+/**
+ * GET /api/capsules/:id/audio — stream the capsule's stored audio back to an
+ * authenticated client (the reading UI fetches this with the Bearer header and
+ * wraps it in an object URL, since a bare <audio src> cannot send the header).
+ * `audio_url` is the R2 key; its meaning is unchanged.
+ */
+async function handleCapsuleAudio(id: string, env: Env): Promise<Response> {
+  const row = await env.DB.prepare(`SELECT audio_url FROM capsules WHERE id = ? LIMIT 1`)
+    .bind(id)
+    .first<{ audio_url: string | null }>();
+  if (!row || !row.audio_url) return errorResponse("not found", 404);
+
+  const obj = await env.AUDIO_BUCKET.get(row.audio_url);
+  if (!obj) return errorResponse("not found", 404);
+
+  return new Response(obj.body, {
+    status: 200,
+    headers: {
+      "content-type": obj.httpMetadata?.contentType || "application/octet-stream",
+      "cache-control": "private, max-age=3600",
+    },
+  });
+}
+
 /* ------------------------------- router --------------------------------- */
 
 export default {
@@ -374,6 +481,24 @@ export default {
         }
         if (path === "/api/ack" && request.method === "POST") {
           return await handleAck(request, env);
+        }
+        if (path === "/api/capsules" && request.method === "GET") {
+          return await handleCapsulesList(request, env);
+        }
+        if (path.startsWith("/api/capsules/")) {
+          const rest = path.slice("/api/capsules/".length);
+          const audioSuffix = "/audio";
+          if (request.method === "GET" && rest.endsWith(audioSuffix)) {
+            const audioId = safeDecode(rest.slice(0, -audioSuffix.length));
+            if (!audioId) return errorResponse("bad request", 400);
+            return await handleCapsuleAudio(audioId, env);
+          }
+          if (request.method === "DELETE" && !rest.includes("/")) {
+            const delId = safeDecode(rest);
+            if (!delId) return errorResponse("bad request", 400);
+            return await handleCapsuleDelete(delId, env);
+          }
+          return errorResponse("not found", 404);
         }
         return errorResponse("not found", 404);
       }

@@ -1,6 +1,6 @@
 /**
  * Lightning Capsule — Service Worker
- * SW version: v2 (Phase 2 PWA shell)
+ * SW version: v3 (Phase 2 PWA shell + reading/management UI)
  *
  * Strategy:
  *   - Precache the app shell (index.html, manifest, icons) on install.
@@ -9,7 +9,7 @@
  *   - Same-origin static assets (manifest / icons): cache-first.
  *   - /api/* requests: never touched by the SW (always hit the network).
  */
-const SW_VERSION = "v2";
+const SW_VERSION = "v3";
 const CACHE_NAME = `lightning-capsule-${SW_VERSION}`;
 const SHELL = ["/", "/index.html", "/manifest.webmanifest", "/icon-192.png", "/icon-512.png"];
 
