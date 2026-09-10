@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="stylesheet" href="popup.css" />
+    <title>闪念胶囊</title>
+  </head>
+  <body>
+    <header>
+      <img src="icons/icon32.png" alt="" width="20" height="20" />
+      <h1>闪念胶囊</h1>
+    </header>
+
+    <!-- Token setup view -->
+    <section id="token-view" hidden>
+      <p class="hint">首次使用请填入访问 Token（仅保存在本机 chrome.storage.local）。</p>
+      <input
+        id="token-input"
+        type="password"
+        placeholder="粘贴访问 Token"
+        autocomplete="off"
+        spellcheck="false"
+      />
+      <button id="token-save" type="button">保存 Token</button>
+    </section>
+
+    <!-- Main view -->
+    <section id="main-view" hidden>
+      <textarea
+        id="text-input"
+        rows="3"
+        placeholder="敲下此刻的灵感，Ctrl/Cmd+Enter 存入"
+      ></textarea>
+      <button id="text-save" type="button">存入文字</button>
+
+      <div class="rec-row">
+        <button id="rec-btn" type="button" class="rec-btn">按住说话</button>
+        <span id="rec-timer" class="rec-timer">0.0s</span>
+      </div>
+      <p class="hint">录音时请保持弹窗打开，关闭弹窗会中断录音（上限 60 秒）。</p>
+
+      <button id="change-token" type="button" class="link">重新设置 Token</button>
+    </section>
+
+    <p id="status" class="status" role="status" aria-live="polite"></p>
+
+    <script src="popup.js"></script>
+  </body>
+</html>
