@@ -1,0 +1,6 @@
+# 根级忽略（三端共用；各子目录另有自己的 .gitignore）
+node_modules/
+.wrangler/
+.dev.vars
+*.log
+.DS_Store
