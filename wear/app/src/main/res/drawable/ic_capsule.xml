@@ -3,6 +3,11 @@
   ICON) and the Wear Widget. White on a transparent background so the watch face
   can tint it. A horizontal capsule "pill" with a lightning bolt punched out
   (evenOdd) — matches the app's "闪念胶囊 / Lightning Capsule" identity.
+
+  The pill is drawn deliberately squat and full-bleed (touches both viewport
+  edges) with a wide straight midsection, and the bolt cutout is large with a
+  chunky stroke, so the glyph stays legible when a watch face tints it a
+  low-contrast grey.
 -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="24dp"
@@ -13,5 +18,5 @@
     <path
         android:fillColor="#FFFFFFFF"
         android:fillType="evenOdd"
-        android:pathData="M8,4 L16,4 A8,8 0 0 1 16,20 L8,20 A8,8 0 0 1 8,4 Z M13,6 L8.5,12.6 L11.5,12.6 L10.5,18 L15.5,10.6 L12.5,10.6 Z" />
+        android:pathData="M7,5 L17,5 A7,7 0 0 1 17,19 L7,19 A7,7 0 0 1 7,5 Z M14.5,6 L8,13.2 L11.3,13.2 L9.5,18 L16,10.8 L12.7,10.8 Z" />
 </vector>

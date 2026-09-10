@@ -14,7 +14,7 @@ import java.util.concurrent.TimeUnit
 /**
  * Uploads a recorded capsule to the Lightning Capsule backend.
  *
- * POST {BASE_URL}/api/capture   (multipart/form-data)
+ * POST {CAPSULE_API_URL}/api/capture   (multipart/form-data)
  *   audio  -> the .m4a file  (content-type audio/mp4)
  *   source -> "wear"
  * Authorization: Bearer <token>
@@ -52,7 +52,7 @@ class CapsuleUploader {
             .build()
 
         val request = Request.Builder()
-            .url("$BASE_URL/api/capture")
+            .url("${BuildConfig.CAPSULE_API_URL}/api/capture")
             .header("Authorization", "Bearer $token")
             .post(body)
             .build()
@@ -70,9 +70,8 @@ class CapsuleUploader {
         }
     }
 
-    private companion object {
-        // 自建部署：换成你自己的 Worker 域名（wrangler deploy 后拿到），
-        // 然后 ./gradlew assembleDebug 重新侧载。见 docs/SELF-HOSTING.md 第 E 节。
-        const val BASE_URL = "https://<your-subdomain>.workers.dev"
-    }
+    // 自建部署：不要在源码里写死域名（本仓库公开）。在 wear/local.properties 里加一行
+    //     capsule.api.url=https://你的-worker.workers.dev
+    // 构建时会注入到 BuildConfig.CAPSULE_API_URL；未设置时回落到占位符。
+    // 见 docs/SELF-HOSTING.md 第 E 节。
 }

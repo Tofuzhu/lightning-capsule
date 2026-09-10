@@ -1,18 +1,24 @@
 package com.lightningcapsule.wear
 
 import android.Manifest
+import android.content.ComponentName
 import android.content.pm.PackageManager
 import android.os.Bundle
+import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.platform.LocalContext
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import androidx.wear.compose.material3.MaterialTheme
+import androidx.wear.compose.material3.dynamicColorScheme
+import androidx.wear.watchface.complications.datasource.ComplicationDataSourceUpdateRequester
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.isActive
@@ -20,6 +26,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.withContext
 import java.io.File
+import java.util.concurrent.atomic.AtomicBoolean
 
 /** UI state machine for the single capture screen. */
 sealed interface UiState {
@@ -75,8 +82,16 @@ class MainActivity : ComponentActivity() {
 
         uiState = if (tokenStore.hasToken) UiState.Idle else UiState.NeedToken
 
+        refreshComplicationOncePerProcess()
+
         setContent {
-            MaterialTheme {
+            // Follow the watch face / system dynamic palette when the user has it
+            // enabled; null is the normal "dynamic theming off" branch, so fall
+            // back to the library's default scheme rather than treating it as an
+            // error. dynamicColorScheme is a plain function (not @Composable).
+            val context = LocalContext.current
+            val dynamicScheme = remember(context) { dynamicColorScheme(context) }
+            MaterialTheme(colorScheme = dynamicScheme ?: MaterialTheme.colorScheme) {
                 val permissionLauncher = rememberLauncherForActivityResult(
                     ActivityResultContracts.RequestPermission(),
                 ) { granted -> hasMicPermission = granted }
@@ -119,6 +134,29 @@ class MainActivity : ComponentActivity() {
         if (uiState is UiState.Recording) {
             recorder.cancel()
             uiState = UiState.Idle
+        }
+    }
+
+    /**
+     * After the app is reinstalled or updated, the watch face keeps the
+     * complication data it cached at bind time — including a tap [PendingIntent]
+     * that now points at the dead previous install, so taps do nothing until the
+     * user re-selects the watch face. Asking the system to re-request data from
+     * our own provider makes it hand the watch face a fresh complication (and
+     * PendingIntent). Fired once per process start — doing it on every onResume
+     * would hammer the provider as the app goes in and out of the foreground.
+     *
+     * Uses [ComplicationDataSourceUpdateRequester], scoped to our own
+     * [CapsuleComplicationService] ComponentName so no other provider is touched.
+     * Best-effort: any failure is logged, never fatal.
+     */
+    private fun refreshComplicationOncePerProcess() {
+        if (!complicationRefreshRequested.compareAndSet(false, true)) return
+        try {
+            val component = ComponentName(this, CapsuleComplicationService::class.java)
+            ComplicationDataSourceUpdateRequester.create(this, component).requestUpdateAll()
+        } catch (e: Exception) {
+            Log.w(TAG, "Complication refresh request failed", e)
         }
     }
 
@@ -232,6 +270,14 @@ class MainActivity : ComponentActivity() {
     }
 
     private companion object {
+        const val TAG = "MainActivity"
         const val EXTRA_AUTH_TOKEN = "auth_token"
+
+        /**
+         * Process-wide guard so [refreshComplicationOncePerProcess] runs at most
+         * once per app process, not once per Activity instance. Reset only when
+         * the process is killed.
+         */
+        val complicationRefreshRequested = AtomicBoolean(false)
     }
 }
