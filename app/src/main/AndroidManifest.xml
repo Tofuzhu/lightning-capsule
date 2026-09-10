@@ -33,6 +33,45 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!-- v3: watch face complication. Static icon that opens MainActivity on tap. -->
+        <service
+            android:name=".CapsuleComplicationService"
+            android:exported="true"
+            android:icon="@drawable/ic_capsule"
+            android:label="@string/complication_label"
+            android:permission="com.google.android.wearable.permission.BIND_COMPLICATION_PROVIDER">
+            <intent-filter>
+                <action android:name="android.support.wearable.complications.ACTION_COMPLICATION_UPDATE_REQUEST" />
+            </intent-filter>
+            <meta-data
+                android:name="android.support.wearable.complications.SUPPORTED_TYPES"
+                android:value="MONOCHROMATIC_IMAGE,SMALL_IMAGE" />
+            <!-- 0 = static, never auto-refreshed. -->
+            <meta-data
+                android:name="android.support.wearable.complications.UPDATE_PERIOD_SECONDS"
+                android:value="0" />
+        </service>
+
+        <!-- v3: Wear OS 7 Widget (swipe-left card). Glance for Wear + Remote Compose. -->
+        <service
+            android:name=".CapsuleWidgetService"
+            android:exported="true"
+            android:icon="@drawable/ic_capsule"
+            android:label="@string/widget_label"
+            android:permission="com.google.android.wearable.permission.BIND_TILE_PROVIDER">
+            <intent-filter>
+                <action android:name="androidx.glance.wear.action.BIND_WIDGET_PROVIDER" />
+                <action android:name="androidx.wear.tiles.action.BIND_TILE_PROVIDER" />
+            </intent-filter>
+            <meta-data
+                android:name="androidx.glance.wear.widget.provider"
+                android:resource="@xml/capsule_widget_info" />
+            <!-- Fallback preview for the Tile-compat rendering path. -->
+            <meta-data
+                android:name="androidx.wear.tiles.PREVIEW"
+                android:resource="@drawable/widget_preview" />
+        </service>
     </application>
 
 </manifest>

@@ -35,7 +35,8 @@
 Kotlin · Jetpack Compose for Wear OS（`androidx.wear.compose:compose-material3`）· OkHttp ·
 单 Activity，无后台服务。
 
-> 不使用 Wear Tiles（Wear OS 7 已 sunset）。从 App 列表启动。
+> 不使用 Wear Tiles（Wear OS 7 已 sunset）。v1 从 App 列表启动；v3 另加表盘 complication /
+> Wear Widget 快捷入口（见下）。
 
 ---
 
@@ -81,6 +82,56 @@ Kotlin · Jetpack Compose for Wear OS（`androidx.wear.compose:compose-material3
 `app/src/test/.../CaptureQueueTest.kt`：入队 / 出队（FIFO）/ 计数与字节上限 / 损坏索引容错 /
 索引与文件不一致容错 / `attempts` 持久化。纯本地逻辑，不依赖网络或 Android 框架
 （`./gradlew testDebugUnitTest`）。
+
+---
+
+## 功能（v3）快捷入口：表盘 Complication + Wear Widget
+
+痛点：按表冠翻应用列表太慢。v3 加两个「一点/一滑直达录音」的入口，**不改动** v1 录音、
+v2 离线队列、后端 Worker，只新增「启动入口」。两者点击行为一致：
+`PendingIntent.getActivity` 拉起 `MainActivity`（`FLAG_IMMUTABLE`，带 `NEW_TASK | CLEAR_TOP`）。
+
+### 1. 表盘 Complication（复杂功能）
+
+- 类型：`MONOCHROMATIC_IMAGE` / `SMALL_IMAGE`(`ICON`)，只有图标无文字，用胶囊字形
+  `res/drawable/ic_capsule.xml`（白色 + 透明底，可被表盘染色）
+- 实现：`CapsuleComplicationService : SuspendingComplicationDataSourceService`
+  （`androidx.wear.watchface:watchface-complications-data-source-ktx`，稳定版）
+  - `onComplicationRequest` / `getPreviewData` 返回同一份静态数据；无状态、无后台任务、无泄漏
+- Manifest：`<service>` 带 `BIND_COMPLICATION_PROVIDER` 权限、
+  `ACTION_COMPLICATION_UPDATE_REQUEST` intent-filter、
+  `SUPPORTED_TYPES=MONOCHROMATIC_IMAGE,SMALL_IMAGE`、`UPDATE_PERIOD_SECONDS=0`（静态，永不自动刷新）
+
+**加到表盘：** 表盘长按 → 编辑 → 选一个 complication 槽位 → 列表里选 **闪念胶囊** → 保存。
+之后点该槽位即进录音屏。
+
+### 2. Wear Widget（Wear OS 7，表盘左滑卡片）
+
+- 用 **Jetpack Glance for Wear + Remote Compose**（`androidx.glance.wear` / `androidx.compose.remote`），
+  **不用已 sunset 的 Tiles API**
+- 实现：`CapsuleWidget : GlanceWearWidget` + `CapsuleWidgetService : GlanceWearWidgetService`
+  （`@AssociateWithGlanceWearWidget`）
+- 尺寸：`res/xml/capsule_widget_info.xml` 声明 **SMALL(2x1)** 与 **LARGE(2x2)** 两个 `<container>`，
+  各带 `previewImage`，`preferredType=small`
+- UI 极简：`RemoteColumn` 居中 = 胶囊图标 + 「按住说话」文字；整张卡片 `clickable(pendingIntentAction { … })`
+- 无动态刷新（不做待传计数），内容仅在系统请求时重建
+
+**加到表盘：** 表盘**向左滑** → 到 widget 区末尾点 **+ / 添加 widget** → 选 **闪念胶囊** →
+选 small 或 large → 完成。之后左滑到该卡片点一下即进录音屏。
+
+### 依赖说明（alpha）
+
+Wear OS 7 Widget 目前只有 Glance for Wear 这一条非废弃的实现路径，相关库仍是 alpha：
+
+```
+androidx.wear.watchface:watchface-complications-data-source-ktx:1.3.0   (稳定)
+androidx.glance.wear:wear / wear-core:1.0.0-alpha17
+androidx.compose.remote:remote-creation-compose / remote-core:1.0.0-alpha18
+androidx.wear.compose.remote:remote-material3:1.0.0-alpha10
+```
+
+版本在 `gradle/libs.versions.toml` 里精确锁定。Widget/Complication 无法本机真机验证，代码按
+官方 sample / API 文档编写，真机效果以用户侧载后反馈为准。APK 体积因此增至约 50 MB（debug）。
 
 ---
 
@@ -207,14 +258,16 @@ lightning-capsule-wear/
     └── src/main/
         ├── AndroidManifest.xml
         ├── java/com/lightningcapsule/wear/
-        │   ├── MainActivity.kt        # 单 Activity + UI 状态机 + 补传编排
-        │   ├── CaptureScreen.kt       # Compose UI（press-to-talk / token / 权限 / 队列状态行）
-        │   ├── AudioRecorder.kt       # MediaRecorder 封装
-        │   ├── CapsuleUploader.kt     # OkHttp multipart 上传（Success / AuthError / Failure）
-        │   ├── CaptureQueue.kt        # 离线队列：文件 + index.json，线程安全，无 Android 依赖
-        │   ├── NetworkMonitor.kt      # ConnectivityManager 默认网络回调
-        │   └── TokenStore.kt          # SharedPreferences token 存取
-        └── res/…                      # 字符串、启动图标
+        │   ├── MainActivity.kt              # 单 Activity + UI 状态机 + 补传编排
+        │   ├── CaptureScreen.kt             # Compose UI（press-to-talk / token / 权限 / 队列状态行）
+        │   ├── AudioRecorder.kt             # MediaRecorder 封装
+        │   ├── CapsuleUploader.kt           # OkHttp multipart 上传（Success / AuthError / Failure）
+        │   ├── CaptureQueue.kt              # 离线队列：文件 + index.json，线程安全，无 Android 依赖
+        │   ├── NetworkMonitor.kt            # ConnectivityManager 默认网络回调
+        │   ├── TokenStore.kt                # SharedPreferences token 存取
+        │   ├── CapsuleComplicationService.kt # v3 表盘 complication（静态图标 → 拉起 MainActivity）
+        │   └── CapsuleWidget.kt             # v3 Wear Widget（Glance for Wear，small/large 卡片）
+        └── res/…                            # 字符串、启动图标、ic_capsule、xml/capsule_widget_info
 
 app/src/test/java/com/lightningcapsule/wear/
 └── CaptureQueueTest.kt               # 队列核心逻辑单元测试（JUnit，纯本地）

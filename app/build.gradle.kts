@@ -54,6 +54,18 @@ dependencies {
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.okhttp)
 
+    // v3 — watch face complication (quick entry from the watch face).
+    implementation(libs.androidx.wear.complications.data.source.ktx)
+
+    // v3 — Wear OS 7 Widget (swipe-left card), built with Jetpack Glance for
+    // Wear + Remote Compose. Alpha libraries: this is the only supported widget
+    // surface on Wear OS 7 (Tiles is sunset), so it is not "optional".
+    implementation(libs.androidx.glance.wear)
+    implementation(libs.androidx.glance.wear.core)
+    implementation(libs.androidx.compose.remote.creation.compose)
+    implementation(libs.androidx.compose.remote.core)
+    implementation(libs.androidx.wear.compose.remote.material3)
+
     debugImplementation(libs.androidx.compose.ui.tooling)
 
     // Queue index is plain JSON; use the real org.json impl on the unit-test

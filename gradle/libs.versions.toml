@@ -14,6 +14,15 @@ okhttp = "4.12.0"
 junit = "4.13.2"
 orgJson = "20240303"
 
+# v3 quick-entry surfaces.
+# Watch face complication: stable API.
+wearComplications = "1.3.0"
+# Wear OS 7 Widget = Jetpack Glance for Wear + Remote Compose. Still alpha
+# (only shipping channel for the non-deprecated widget surface); pinned exact.
+glanceWear = "1.0.0-alpha17"
+remoteCompose = "1.0.0-alpha18"
+remoteMaterial3 = "1.0.0-alpha10"
+
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
 androidx-activity-compose = { group = "androidx.activity", name = "activity-compose", version.ref = "activityCompose" }
@@ -25,6 +34,13 @@ androidx-compose-ui-tooling-preview = { group = "androidx.compose.ui", name = "u
 androidx-wear-compose-material3 = { group = "androidx.wear.compose", name = "compose-material3", version.ref = "wearCompose" }
 androidx-wear-compose-foundation = { group = "androidx.wear.compose", name = "compose-foundation", version.ref = "wearCompose" }
 kotlinx-coroutines-android = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-android", version.ref = "coroutines" }
+
+androidx-wear-complications-data-source-ktx = { group = "androidx.wear.watchface", name = "watchface-complications-data-source-ktx", version.ref = "wearComplications" }
+androidx-glance-wear = { group = "androidx.glance.wear", name = "wear", version.ref = "glanceWear" }
+androidx-glance-wear-core = { group = "androidx.glance.wear", name = "wear-core", version.ref = "glanceWear" }
+androidx-compose-remote-creation-compose = { group = "androidx.compose.remote", name = "remote-creation-compose", version.ref = "remoteCompose" }
+androidx-compose-remote-core = { group = "androidx.compose.remote", name = "remote-core", version.ref = "remoteCompose" }
+androidx-wear-compose-remote-material3 = { group = "androidx.wear.compose.remote", name = "remote-material3", version.ref = "remoteMaterial3" }
 okhttp = { group = "com.squareup.okhttp3", name = "okhttp", version.ref = "okhttp" }
 junit = { group = "junit", name = "junit", version.ref = "junit" }
 org-json = { group = "org.json", name = "json", version.ref = "orgJson" }

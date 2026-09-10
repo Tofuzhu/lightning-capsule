@@ -23,6 +23,12 @@
     <string name="record_failed">无法录音</string>
     <string name="hold_to_retry">按住重录</string>
 
+    <!-- v3 quick entries: complication + Wear Widget -->
+    <string name="complication_label">闪念胶囊</string>
+    <string name="complication_description">闪念胶囊 · 按住说话</string>
+    <string name="widget_label">闪念胶囊</string>
+    <string name="widget_description">按住说话，快速记录闪念</string>
+
     <string name="token_title">输入 AUTH_TOKEN</string>
     <string name="token_hint">粘贴 Bearer token</string>
     <string name="save">保存</string>

@@ -1,0 +1,17 @@
+<!--
+  Static preview shown in the watch's widget picker. Placeholder art only
+  (a rounded card with the capsule glyph); the real widget renders via Glance.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="96dp"
+    android:height="96dp"
+    android:viewportWidth="96"
+    android:viewportHeight="96">
+    <path
+        android:fillColor="#FF2A2E37"
+        android:pathData="M16,4 L80,4 A12,12 0 0 1 92,16 L92,80 A12,12 0 0 1 80,92 L16,92 A12,12 0 0 1 4,80 L4,16 A12,12 0 0 1 16,4 Z" />
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:fillType="evenOdd"
+        android:pathData="M40,30 L56,30 A16,16 0 0 1 56,62 L40,62 A16,16 0 0 1 40,30 Z M50,34 L41,47.2 L47,47.2 L45,58 L55,43.2 L49,43.2 Z" />
+</vector>
