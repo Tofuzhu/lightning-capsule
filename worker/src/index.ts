@@ -184,12 +184,13 @@ async function transcribeWithTimeout(env: Env, audio: ArrayBuffer): Promise<stri
 async function transcribeFromR2(
   env: Env,
   audioKey: string,
-): Promise<{ transcript: string; checksum: string }> {
+): Promise<{ transcript: string; checksum: string; audioSizeBytes: number }> {
   const obj = await env.AUDIO_BUCKET.get(audioKey);
   if (!obj) throw new Error("r2 object missing");
-  const transcript = await transcribeWithTimeout(env, await obj.arrayBuffer());
+  const bytes = await obj.arrayBuffer();
+  const transcript = await transcribeWithTimeout(env, bytes);
   const checksum = await sha256Hex(transcript);
-  return { transcript, checksum };
+  return { transcript, checksum, audioSizeBytes: bytes.byteLength };
 }
 
 /**
@@ -585,20 +586,22 @@ async function handleCapsuleRetry(id: string, env: Env): Promise<Response> {
 
   let transcript: string;
   let checksum: string;
+  let audioSizeBytes: number;
   try {
-    ({ transcript, checksum } = await transcribeFromR2(env, row.audio_url));
+    ({ transcript, checksum, audioSizeBytes } = await transcribeFromR2(env, row.audio_url));
   } catch (err) {
     // keep pending_retry so cron / a later manual retry can try again
     console.error(`manual retry transcription failed for capsule ${id}`, err);
     return errorResponse("transcription failed", 502);
   }
 
+  const captureStatus = isLikelyHallucination(transcript, audioSizeBytes) ? "noise" : "pending";
   try {
     await env.DB.prepare(
-      `UPDATE capsules SET content = ?, raw_transcript = ?, checksum = ?, status = 'pending',
+      `UPDATE capsules SET content = ?, raw_transcript = ?, checksum = ?, status = ?,
        updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
     )
-      .bind(transcript, transcript, checksum, id)
+      .bind(transcript, transcript, checksum, captureStatus, id)
       .run();
   } catch (dbErr) {
     console.error("D1 update (retry) failed", dbErr);
@@ -628,12 +631,13 @@ async function runScheduledRetries(env: Env): Promise<void> {
 
   for (const row of results ?? []) {
     try {
-      const { transcript, checksum } = await transcribeFromR2(env, row.audio_url);
+      const { transcript, checksum, audioSizeBytes } = await transcribeFromR2(env, row.audio_url);
+      const captureStatus = isLikelyHallucination(transcript, audioSizeBytes) ? "noise" : "pending";
       await env.DB.prepare(
-        `UPDATE capsules SET content = ?, raw_transcript = ?, checksum = ?, status = 'pending',
+        `UPDATE capsules SET content = ?, raw_transcript = ?, checksum = ?, status = ?,
          updated_at = CURRENT_TIMESTAMP WHERE id = ? AND status = 'pending_retry'`,
       )
-        .bind(transcript, transcript, checksum, row.id)
+        .bind(transcript, transcript, checksum, captureStatus, row.id)
         .run();
     } catch (err) {
       console.error(`scheduled retry failed for capsule ${row.id}`, err);
