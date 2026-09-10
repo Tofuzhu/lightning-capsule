@@ -6,10 +6,13 @@ const TOKEN_KEY = "auth_token";
 const MENU_ID = "lc-save-selection";
 
 chrome.runtime.onInstalled.addListener(() => {
-  chrome.contextMenus.create({
-    id: MENU_ID,
-    title: "存入闪念胶囊",
-    contexts: ["selection"],
+  // removeAll first so re-running on extension update doesn't hit a duplicate id.
+  chrome.contextMenus.removeAll(() => {
+    chrome.contextMenus.create({
+      id: MENU_ID,
+      title: "存入闪念胶囊",
+      contexts: ["selection"],
+    });
   });
 });
 
