@@ -1,6 +1,22 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.compose.compiler)
+}
+
+// API base URL is injected at build time so the real domain never lands in the
+// (public) repo. Add a line to wear/local.properties (gitignored):
+//     capsule.api.url=https://your-worker.workers.dev
+// Falls back to the placeholder when unset (e.g. CI / fresh clone).
+val capsuleApiUrl: String = run {
+    val props = Properties().apply {
+        val f = rootProject.file("local.properties")
+        if (f.exists()) f.inputStream().use { load(it) }
+    }
+    props.getProperty("capsule.api.url")
+        ?: (project.findProperty("capsule.api.url") as String?)
+        ?: "https://<your-subdomain>.workers.dev"
 }
 
 android {
@@ -13,6 +29,8 @@ android {
         targetSdk = 37
         versionCode = 1
         versionName = "1.0"
+
+        buildConfigField("String", "CAPSULE_API_URL", "\"$capsuleApiUrl\"")
     }
 
     buildTypes {
@@ -37,6 +55,7 @@ android {
 
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 }
 

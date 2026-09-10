@@ -22,6 +22,7 @@
     <string name="recording_too_short">录音太短</string>
     <string name="record_failed">无法录音</string>
     <string name="hold_to_retry">按住重录</string>
+    <string name="talk_button_desc">按住说话录音，松手上传</string>
 
     <!-- v3 quick entries: complication + Wear Widget -->
     <string name="complication_label">闪念胶囊</string>
